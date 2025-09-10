@@ -1,0 +1,54 @@
+from rest_framework import serializers
+from .models import ClientRequest, SupplierQuote, PurchaseOrder, POTracker
+
+class SupplierQuoteSerializer(serializers.ModelSerializer):
+    supplier_name = serializers.CharField(source="supplier.name", read_only=True)
+    client_request_details = serializers.SerializerMethodField()
+
+    class Meta:
+        model = SupplierQuote
+        fields = [
+            "id", "supplier", "supplier_name", "client_request",
+            "price", "import_type", "currency", "quoted_price",
+            "lead_time_days", "comments", "created_at",
+            "client_request_details",
+        ]
+
+    def get_client_request_details(self, obj):
+        if obj.client_request:
+            return {
+                "item_name": obj.client_request.item_name,
+                "specification": obj.client_request.specification,
+                "model": obj.client_request.model,
+                "brand": obj.client_request.brand,
+                "quantity": obj.client_request.quantity,
+                "uom": obj.client_request.uom,
+                "status": obj.client_request.status,
+            }
+        return None
+
+
+class ClientRequestSerializer(serializers.ModelSerializer):
+    client_name = serializers.CharField(source="client.name", read_only=True)
+    contact_person_name = serializers.CharField(source="contact_person.name", read_only=True)
+    supplier_quotes = SupplierQuoteSerializer(source="supplierquote_set", many=True, read_only=True)
+
+    class Meta:
+        model = ClientRequest
+        fields = "__all__"
+
+
+class POTrackerSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = POTracker
+        fields = ["id", "status", "description", "updated_at", "purchase_order"]
+
+
+class PurchaseOrderSerializer(serializers.ModelSerializer):
+    client_name = serializers.CharField(source="client.name", read_only=True)
+    supplier_name = serializers.CharField(source="supplier_quote.supplier.name", read_only=True)
+    trackers = POTrackerSerializer(source="potracker_set", many=True, read_only=True)
+
+    class Meta:
+        model = PurchaseOrder
+        fields = "__all__"
