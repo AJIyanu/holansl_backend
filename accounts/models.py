@@ -63,6 +63,10 @@ class StaffProfile(models.Model):
         CONTRACT = 'CT', _('Contract')
         INTERN = 'IN', _('Intern')
 
+    class Sex(models.TextChoices):
+        MALE = 'M', _('Male')
+        FEMALE = 'F', _('Female')
+        
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
     
@@ -80,6 +84,11 @@ class StaffProfile(models.Model):
     end_date = models.DateField(null=True, blank=True)
     phone_number = models.CharField(max_length=20, unique=True)
     address = models.CharField(max_length=255, blank=True)
+
+    middle_name = models.CharField(max_length=100, blank=True)
+    sex = models.CharField(max_length=1, choices=Sex.choices, null=True, blank=True)
+    date_of_birth = models.DateField(null=True, blank=True)
+    nationality = models.CharField(max_length=100, blank=True, default='Nigerian')
 
     class Meta:
         verbose_name = _('Staff Profile')

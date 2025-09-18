@@ -7,6 +7,8 @@ from .serializers import (
     UserSerializer, StaffProfileSerializer, DepartmentSerializer, RoleSerializer,
     PermissionSerializer
 )
+from rest_framework.generics import RetrieveAPIView
+from rest_framework.permissions import IsAuthenticated
 
 class UserViewSet(viewsets.ModelViewSet):
     """API endpoint that allows users to be viewed or edited."""
@@ -58,5 +60,15 @@ class PermissionViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Permission.objects.all()
     serializer_class = PermissionSerializer
     permission_classes = [IsAdminUser]
-    # Disable pagination to see all permissions at once
     pagination_class = None
+
+class CurrentUserView(RetrieveAPIView):
+    """
+    API endpoint to retrieve the currently authenticated user's data,
+    including their linked staff profile.
+    """
+    serializer_class = UserSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_object(self):
+        return self.request.user
