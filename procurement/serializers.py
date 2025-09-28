@@ -47,7 +47,10 @@ class POTrackerSerializer(serializers.ModelSerializer):
 class PurchaseOrderSerializer(serializers.ModelSerializer):
     client_name = serializers.CharField(source="client.name", read_only=True)
     supplier_name = serializers.CharField(source="supplier_quote.supplier.name", read_only=True)
-    trackers = POTrackerSerializer(source="potracker_set", many=True, read_only=True)
+    item_name = serializers.CharField(source="supplier_quote.client_request.item_name", read_only=True)
+    item_brand = serializers.CharField(source="supplier_quote.client_request.brand", read_only=True)
+    request_id = serializers.CharField(source="supplier_quote.client_request.id", read_only=True)
+    trackers = POTrackerSerializer( many=True, read_only=True)
 
     class Meta:
         model = PurchaseOrder

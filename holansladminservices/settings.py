@@ -49,6 +49,7 @@ INSTALLED_APPS = [
     'ledger',
     'django_filters',
     'accounts',
+    'drf_spectacular',
 ]
 
 MIDDLEWARE = [
@@ -152,6 +153,7 @@ REST_FRAMEWORK = {
         "rest_framework.filters.SearchFilter",
         "rest_framework.filters.OrderingFilter",
     ],
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
 }
 
 SIMPLE_JWT = {
@@ -159,3 +161,10 @@ SIMPLE_JWT = {
 }
 
 AUTH_USER_MODEL = "accounts.User"
+
+SPECTACULAR_SETTINGS = {
+    'TITLE': 'HolanSL Admin Dashboard API',
+    'DESCRIPTION': 'Holan Integrated Services Ltd Administrative',
+    'VERSION': '1.0.0',
+    'SERVE_INCLUDE_SCHEMA': False,
+}

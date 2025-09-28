@@ -19,7 +19,7 @@ class ClientRequest(models.Model):
     specification = models.TextField(blank=True, null=True)
     model = models.CharField(max_length=100, blank=True, null=True)
     brand = models.CharField(max_length=100, blank=True, null=True)
-    uom = models.CharField(max_length=50)  # e.g., "kg", "pcs"
+    uom = models.CharField(max_length=50)
     quantity = models.PositiveIntegerField()
 
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")

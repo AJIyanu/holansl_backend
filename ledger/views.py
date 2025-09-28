@@ -27,8 +27,8 @@ class ExpectationViewSet(viewsets.ModelViewSet):
     queryset = Expectation.objects.all()
     serializer_class = ExpectationSerializer
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ["type", "status", "currency"]
-    search_fields = ["type"]
+    filterset_fields = ["category", "status", "currency"]
+    search_fields = ["category"]
     ordering_fields = ["created_at", "updated_at", "amount"]
     permission_classes = [DjangoModelPermissions]
 
