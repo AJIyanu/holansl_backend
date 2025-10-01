@@ -29,8 +29,7 @@ SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "test-secret-key")
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv("DEBUG", False)
 
-ALLOWED_HOSTS = []
-
+ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', 'holansl-backend.onrender.com').split(',')
 
 # Application definition
 
