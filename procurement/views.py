@@ -13,9 +13,17 @@ from .serializers import (
 class ClientRequestViewSet(viewsets.ModelViewSet):
     queryset = ClientRequest.objects.all().order_by("-created_at")
     serializer_class = ClientRequestSerializer
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filter_backends = [
+        DjangoFilterBackend,
+        filters.SearchFilter,
+        filters.OrderingFilter]
     filterset_fields = ["status", "client", "item_name", "brand"]
-    search_fields = ["item_name", "specification", "model", "brand", "comments"]
+    search_fields = [
+        "item_name",
+        "specification",
+        "model",
+        "brand",
+        "comments"]
     ordering_fields = ["created_at", "updated_at", "quantity"]
     permission_classes = [DjangoModelPermissions]
 
@@ -23,7 +31,10 @@ class ClientRequestViewSet(viewsets.ModelViewSet):
 class SupplierQuoteViewSet(viewsets.ModelViewSet):
     queryset = SupplierQuote.objects.all().order_by("-created_at")
     serializer_class = SupplierQuoteSerializer
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filter_backends = [
+        DjangoFilterBackend,
+        filters.SearchFilter,
+        filters.OrderingFilter]
     filterset_fields = ["import_type", "supplier", "client_request"]
     search_fields = ["comments", "currency"]
     ordering_fields = ["created_at", "price", "quoted_price", "lead_time_days"]
@@ -33,7 +44,10 @@ class SupplierQuoteViewSet(viewsets.ModelViewSet):
 class PurchaseOrderViewSet(viewsets.ModelViewSet):
     queryset = PurchaseOrder.objects.all().order_by("-created_at")
     serializer_class = PurchaseOrderSerializer
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filter_backends = [
+        DjangoFilterBackend,
+        filters.SearchFilter,
+        filters.OrderingFilter]
     filterset_fields = ["status", "client", "supplier_quote"]
     search_fields = ["po_number"]
     ordering_fields = ["created_at", "expiry_date", "price", "quantity"]
@@ -43,7 +57,10 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
 class POTrackerViewSet(viewsets.ModelViewSet):
     queryset = POTracker.objects.all().order_by("-updated_at")
     serializer_class = POTrackerSerializer
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filter_backends = [
+        DjangoFilterBackend,
+        filters.SearchFilter,
+        filters.OrderingFilter]
     filterset_fields = ["status", "purchase_order"]
     search_fields = ["description"]
     ordering_fields = ["updated_at"]

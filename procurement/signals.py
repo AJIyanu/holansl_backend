@@ -15,7 +15,8 @@ def mark_request_completed(sender, instance, created, **kwargs):
 def revert_request_status(sender, instance, **kwargs):
     """If SupplierQuote deleted and none left, revert ClientRequest to processing."""
     client_request = instance.client_request
-    if client_request and not SupplierQuote.objects.filter(client_request=client_request).exists():
+    if client_request and not SupplierQuote.objects.filter(
+            client_request=client_request).exists():
         client_request.status = "processing"
         client_request.save(update_fields=["status"])
 
@@ -31,14 +32,19 @@ def create_or_update_potracker(sender, instance, created, **kwargs):
         POTracker.objects.create(
             purchase_order=instance,
             status=instance.status,
-            description=f"Purchase Order {instance.po_number} created with status '{instance.status}'.",
+            description=f"Purchase Order {
+                instance.po_number} created with status '{
+                instance.status}'.",
         )
     else:
         # Update existing tracker or create log entry
-        last_tracker = POTracker.objects.filter(purchase_order=instance).order_by("-updated_at").first()
+        last_tracker = POTracker.objects.filter(
+            purchase_order=instance).order_by("-updated_at").first()
         if last_tracker and last_tracker.status != instance.status:
             POTracker.objects.create(
                 purchase_order=instance,
                 status=instance.status,
-                description=f"Status changed to '{instance.status}' from {last_tracker.status}.",
+                description=f"Status changed to '{
+                    instance.status}' from {
+                    last_tracker.status}.",
             )

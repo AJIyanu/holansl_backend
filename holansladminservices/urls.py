@@ -21,14 +21,14 @@ from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView, Sp
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path("api/crm/", include("crm.urls")),
-    path("api/procurement/", include("procurement.urls")),
-    path("api/ledger/", include("ledger.urls")),
-    path("api/account/", include("accounts.urls")),
+    path("crm/", include("crm.urls")),
+    path("procurement/", include("procurement.urls")),
+    path("ledger/", include("ledger.urls")),
+    path("account/", include("accounts.urls")),
     path("api-auth/", include("rest_framework.urls")),
-    path("api/token/", TokenObtainPairView.as_view(), name="token_obtain_pair"),
-    path("api/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
-    path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
+    path("token/", TokenObtainPairView.as_view(), name="token_obtain_pair"),
+    path("token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
+    path('schema/', SpectacularAPIView.as_view(), name='schema'),
 
     # Swagger UI: The interactive interface for testing and viewing docs
     path('api/schema/swagger-ui/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),

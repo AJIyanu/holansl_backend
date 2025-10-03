@@ -1,8 +1,10 @@
 from rest_framework import serializers
 from .models import ClientRequest, SupplierQuote, PurchaseOrder, POTracker
 
+
 class SupplierQuoteSerializer(serializers.ModelSerializer):
-    supplier_name = serializers.CharField(source="supplier.name", read_only=True)
+    supplier_name = serializers.CharField(
+        source="supplier.name", read_only=True)
     client_request_details = serializers.SerializerMethodField()
 
     class Meta:
@@ -30,8 +32,16 @@ class SupplierQuoteSerializer(serializers.ModelSerializer):
 
 class ClientRequestSerializer(serializers.ModelSerializer):
     client_name = serializers.CharField(source="client.name", read_only=True)
-    contact_person_name = serializers.CharField(source="contact_person.name", read_only=True)
-    supplier_quotes = SupplierQuoteSerializer(source="supplierquote_set", many=True, read_only=True)
+    supplier_quotes = SupplierQuoteSerializer(
+        source="supplierquote_set", many=True, read_only=True)
+    contact_person_name = serializers.SerializerMethodField()
+
+    def get_contact_person_name(self, obj):
+        if obj.contact_person:
+            first = obj.contact_person.first_name or ''
+            last = obj.contact_person.last_name or ''
+            return f'{first} {last}'.strip()
+        return ''
 
     class Meta:
         model = ClientRequest
@@ -41,16 +51,28 @@ class ClientRequestSerializer(serializers.ModelSerializer):
 class POTrackerSerializer(serializers.ModelSerializer):
     class Meta:
         model = POTracker
-        fields = ["id", "status", "description", "updated_at", "purchase_order"]
+        fields = [
+            "id",
+            "status",
+            "description",
+            "updated_at",
+            "purchase_order"]
 
 
 class PurchaseOrderSerializer(serializers.ModelSerializer):
     client_name = serializers.CharField(source="client.name", read_only=True)
-    supplier_name = serializers.CharField(source="supplier_quote.supplier.name", read_only=True)
-    item_name = serializers.CharField(source="supplier_quote.client_request.item_name", read_only=True)
-    item_brand = serializers.CharField(source="supplier_quote.client_request.brand", read_only=True)
-    request_id = serializers.CharField(source="supplier_quote.client_request.id", read_only=True)
-    trackers = POTrackerSerializer( many=True, read_only=True)
+    supplier_name = serializers.CharField(
+        source="supplier_quote.supplier.name", read_only=True)
+    item_name = serializers.CharField(
+        source="supplier_quote.client_request.item_name",
+        read_only=True)
+    item_brand = serializers.CharField(
+        source="supplier_quote.client_request.brand",
+        read_only=True)
+    request_id = serializers.CharField(
+        source="supplier_quote.client_request.id",
+        read_only=True)
+    trackers = POTrackerSerializer(many=True, read_only=True)
 
     class Meta:
         model = PurchaseOrder

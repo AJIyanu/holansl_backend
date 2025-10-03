@@ -33,12 +33,6 @@ DEBUG = os.getenv("DEBUG", False)
 
 ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', 'holansl-backend.onrender.com').split(',')
 
-# ----------------- TEMPORARY DEBUG CODE -----------------
-# Print the value to standard output (which goes to Render logs)
-print(f"DEBUG_CHECK: ALLOWED_HOSTS from ENV: {os.environ.get('ALLOWED_HOSTS')}")
-print(f"DEBUG_CHECK: Final ALLOWED_HOSTS list: {ALLOWED_HOSTS}")
-sys.stdout.flush() 
-# --------------------------------------------------------
 
 # Application definition
 

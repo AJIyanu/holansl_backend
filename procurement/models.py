@@ -13,8 +13,16 @@ class ClientRequest(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
-    client = models.ForeignKey(Party, on_delete=models.CASCADE, limit_choices_to={"party_type": "client"})
-    contact_person = models.ForeignKey(ContactPerson, on_delete=models.SET_NULL, blank=True, null=True)
+    client = models.ForeignKey(
+        Party,
+        on_delete=models.CASCADE,
+        limit_choices_to={
+            "party_type": "client"})
+    contact_person = models.ForeignKey(
+        ContactPerson,
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True)
     item_name = models.CharField(max_length=255)
     specification = models.TextField(blank=True, null=True)
     model = models.CharField(max_length=100, blank=True, null=True)
@@ -22,7 +30,10 @@ class ClientRequest(models.Model):
     uom = models.CharField(max_length=50)
     quantity = models.PositiveIntegerField()
 
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default="pending")
     comments = models.TextField(blank=True, null=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -40,14 +51,26 @@ class SupplierQuote(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
-    client_request = models.ForeignKey(ClientRequest, on_delete=models.CASCADE, related_name="quotes")
-    supplier = models.ForeignKey(Party, on_delete=models.CASCADE, limit_choices_to={"party_type": "supplier"})
+    client_request = models.ForeignKey(
+        ClientRequest,
+        on_delete=models.CASCADE,
+        related_name="quotes")
+    supplier = models.ForeignKey(
+        Party,
+        on_delete=models.CASCADE,
+        limit_choices_to={
+            "party_type": "supplier"})
 
     price = models.DecimalField(max_digits=12, decimal_places=2)
-    import_type = models.CharField(max_length=20, choices=IMPORT_TYPE, default="local")
-    logistics_cost = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    import_type = models.CharField(
+        max_length=20,
+        choices=IMPORT_TYPE,
+        default="local")
+    logistics_cost = models.DecimalField(
+        max_digits=12, decimal_places=2, default=0)
     currency = models.CharField(max_length=10, default="USD")
-    quoted_price = models.DecimalField(max_digits=12, decimal_places=2, blank=True, null=True)
+    quoted_price = models.DecimalField(
+        max_digits=12, decimal_places=2, blank=True, null=True)
 
     comments = models.TextField(blank=True, null=True)
     lead_time_days = models.PositiveIntegerField(blank=True, null=True)
@@ -72,15 +95,25 @@ class PurchaseOrder(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
     po_number = models.CharField(max_length=100, unique=True)
-    client = models.ForeignKey(Party, on_delete=models.CASCADE, limit_choices_to={"party_type": "client"})
-    supplier_quote = models.ForeignKey(SupplierQuote, on_delete=models.CASCADE, related_name="purchase_orders")
+    client = models.ForeignKey(
+        Party,
+        on_delete=models.CASCADE,
+        limit_choices_to={
+            "party_type": "client"})
+    supplier_quote = models.ForeignKey(
+        SupplierQuote,
+        on_delete=models.CASCADE,
+        related_name="purchase_orders")
 
     quantity = models.PositiveIntegerField()
     uom = models.CharField(max_length=50)
     price = models.DecimalField(max_digits=12, decimal_places=2)
     expiry_date = models.DateField(blank=True, null=True)
 
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default="pending")
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -90,8 +123,13 @@ class PurchaseOrder(models.Model):
 class POTracker(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
-    purchase_order = models.ForeignKey(PurchaseOrder, on_delete=models.CASCADE, related_name="trackers")
-    status = models.CharField(max_length=20, choices=PurchaseOrder.STATUS_CHOICES)
+    purchase_order = models.ForeignKey(
+        PurchaseOrder,
+        on_delete=models.CASCADE,
+        related_name="trackers")
+    status = models.CharField(
+        max_length=20,
+        choices=PurchaseOrder.STATUS_CHOICES)
     description = models.TextField(blank=True, null=True)
     updated_at = models.DateTimeField(auto_now_add=True)
 
