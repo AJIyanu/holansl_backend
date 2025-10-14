@@ -1,5 +1,5 @@
 from rest_framework import viewsets
-from rest_framework.permissions import IsAdminUser
+from rest_framework.permissions import IsAdminUser, AllowAny
 from django.contrib.auth.models import Permission
 from .models import User, StaffProfile, Department, Role
 from rest_framework.permissions import DjangoModelPermissions
@@ -9,6 +9,9 @@ from .serializers import (
 )
 from rest_framework.generics import RetrieveAPIView
 from rest_framework.permissions import IsAuthenticated
+
+from rest_framework.decorators import api_view, permission_classes
+from django.http import JsonResponse
 
 class UserViewSet(viewsets.ModelViewSet):
     """API endpoint that allows users to be viewed or edited."""
@@ -72,3 +75,12 @@ class CurrentUserView(RetrieveAPIView):
 
     def get_object(self):
         return self.request.user
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def health_check(request):
+    return JsonResponse({
+        'status': 'ok',
+        'message': 'Server is running'
+    })
