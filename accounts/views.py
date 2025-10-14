@@ -12,6 +12,7 @@ from rest_framework.permissions import IsAuthenticated
 
 from rest_framework.decorators import api_view, permission_classes
 from django.http import JsonResponse
+from django.http import HttpResponse
 
 class UserViewSet(viewsets.ModelViewSet):
     """API endpoint that allows users to be viewed or edited."""
@@ -77,9 +78,11 @@ class CurrentUserView(RetrieveAPIView):
         return self.request.user
 
 
-@api_view(['GET'])
+@api_view(['GET', 'HEAD'])
 @permission_classes([AllowAny])
 def health_check(request):
+    if request.method == "HEAD":
+        return HttpResponse("OK", status=200)
     return JsonResponse({
         'status': 'ok',
         'message': 'Server is running'
