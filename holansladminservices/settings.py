@@ -58,7 +58,7 @@ MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'holansladminservices.middleware.auth_header_fallback_middleware',
-    # 'holansladminservices.middleware.header_debug_middleware',  Custom middleware for logging headers
+    'holansladminservices.middleware.header_debug_middleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
