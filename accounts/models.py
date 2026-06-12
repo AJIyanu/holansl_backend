@@ -111,3 +111,111 @@ class StaffProfile(models.Model):
             self.employee_id = f"HOL-{self.department.code.upper()}-{next_serial:03d}"
             
         super().save(*args, **kwargs)
+
+# =============================================================================
+# AUTH LOGGING MODELS
+# =============================================================================
+
+class AuditLog(models.Model):
+    class EventCategory(models.TextChoices):
+        AUTH = "AUTH", "Authentication"
+        CRUD = "CRUD", "CRUD Activity"
+        SYSTEM = "SYSTEM", "System"
+        SECURITY = "SECURITY", "Security"
+
+    class EventType(models.TextChoices):
+        LOGIN_SUCCESS = "LOGIN_SUCCESS", "Login Success"
+        LOGIN_FAILED = "LOGIN_FAILED", "Login Failed"
+        LOGOUT = "LOGOUT", "Logout"
+
+        CREATE = "CREATE", "Create"
+        READ = "READ", "Read"
+        UPDATE = "UPDATE", "Update"
+        DELETE = "DELETE", "Delete"
+
+    class EventStatus(models.TextChoices):
+        SUCCESS = "SUCCESS", "Success"
+        FAILED = "FAILED", "Failed"
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="audit_logs",
+    )
+
+    event_category = models.CharField(
+        max_length=20,
+        choices=EventCategory.choices,
+        default=EventCategory.AUTH,
+    )
+
+    event_type = models.CharField(
+        max_length=50,
+        choices=EventType.choices,
+    )
+
+    status = models.CharField(
+        max_length=20,
+        choices=EventStatus.choices,
+    )
+
+    username_attempted = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="Username/email submitted during login attempt.",
+    )
+
+    app_label = models.CharField(
+        max_length=100,
+        blank=True,
+        help_text="For future CRUD logs, e.g. crm, procurement, ledger.",
+    )
+
+    resource = models.CharField(
+        max_length=100,
+        blank=True,
+        help_text="For future CRUD logs, e.g. party, clientrequest, transaction.",
+    )
+
+    action = models.CharField(
+        max_length=100,
+        blank=True,
+        help_text="For future CRUD logs, e.g. create, view, edit, delete.",
+    )
+
+    object_id = models.CharField(
+        max_length=100,
+        blank=True,
+        help_text="Affected object ID for future CRUD logs.",
+    )
+
+    ip_address = models.GenericIPAddressField(
+        null=True,
+        blank=True,
+    )
+
+    user_agent = models.TextField(
+        blank=True,
+    )
+
+    metadata = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Extra details such as error reason, request path, etc.",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["user", "-created_at"], name="audit_user_created_idx"),
+            models.Index(fields=["event_type", "-created_at"], name="audit_event_created_idx"),
+            models.Index(fields=["event_category", "-created_at"], name="audit_cat_created_idx"),
+        ]
+
+    def __str__(self):
+        username = self.user.username if self.user else self.username_attempted or "Unknown user"
+        return f"{self.event_type} - {username} - {self.created_at}"

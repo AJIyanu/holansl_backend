@@ -1,6 +1,110 @@
 from rest_framework import serializers
-from .models import User, StaffProfile, Department, Role
 from django.contrib.auth.models import Permission
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+from rest_framework.exceptions import AuthenticationFailed
+from django.contrib.auth import get_user_model
+
+from .models import User, StaffProfile, Department, Role, AuditLog
+
+
+DJANGO_ACTION_MAP = {
+    "add": "create",
+    "change": "edit",
+    "delete": "delete",
+    "view": "view",
+}
+
+def format_permission(permission: Permission) -> str:
+    """
+    Convert Django permission format:
+    crm.change_party
+
+    Into frontend format:
+    crm.party.edit
+    """
+    app_label = permission.content_type.app_label
+    codename = permission.codename
+
+    try:
+        django_action, resource = codename.split("_", 1)
+    except ValueError:
+        return f"{app_label}.{codename}"
+
+    action = DJANGO_ACTION_MAP.get(django_action, django_action)
+
+    return f"{app_label}.{resource}.{action}"
+
+def get_client_ip(request):
+    if not request:
+        return None
+
+    x_forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")
+
+    if x_forwarded_for:
+        return x_forwarded_for.split(",")[0].strip()
+
+    return request.META.get("REMOTE_ADDR")
+
+
+def get_user_agent(request):
+    if not request:
+        return ""
+
+    return request.META.get("HTTP_USER_AGENT", "")
+
+
+class HolanTokenObtainPairSerializer(TokenObtainPairSerializer):
+    def validate(self, attrs):
+        request = self.context.get("request")
+        username = attrs.get(self.username_field, "")
+
+        try:
+            data = super().validate(attrs)
+        except AuthenticationFailed as exc:
+            self.log_failed_login(request=request, username=username, error=str(exc))
+            raise exc
+
+        self.log_successful_login(request=request, user=self.user, username=username)
+
+        return data
+
+    def log_successful_login(self, request, user, username):
+        AuditLog.objects.create(
+            user=user,
+            event_category=AuditLog.EventCategory.AUTH,
+            event_type=AuditLog.EventType.LOGIN_SUCCESS,
+            status=AuditLog.EventStatus.SUCCESS,
+            username_attempted=username,
+            ip_address=get_client_ip(request),
+            user_agent=get_user_agent(request),
+            metadata={
+                "path": request.path if request else "",
+                "method": request.method if request else "",
+            },
+        )
+
+    def log_failed_login(self, request, username, error):
+        User = get_user_model()
+
+        user = (
+            User.objects.filter(username=username).first()
+            or User.objects.filter(email=username).first()
+        )
+
+        AuditLog.objects.create(
+            user=user,
+            event_category=AuditLog.EventCategory.AUTH,
+            event_type=AuditLog.EventType.LOGIN_FAILED,
+            status=AuditLog.EventStatus.FAILED,
+            username_attempted=username,
+            ip_address=get_client_ip(request),
+            user_agent=get_user_agent(request),
+            metadata={
+                "error": error,
+                "path": request.path if request else "",
+                "method": request.method if request else "",
+            },
+        )
 
 class UserSerializer(serializers.ModelSerializer):
     """
@@ -86,3 +190,59 @@ class RoleSerializer(serializers.ModelSerializer):
     class Meta:
         model = Role
         fields = ('id', 'name', 'permissions')
+
+class CurrentUserSerializer(serializers.ModelSerializer):
+    roles = serializers.SerializerMethodField()
+    permissions = serializers.SerializerMethodField()
+    profile = StaffProfileSerializer(read_only=True)
+
+    class Meta:
+        model = User
+        fields = (
+            "id",
+            "username",
+            "email",
+            "first_name",
+            "last_name",
+            "is_staff",
+            "is_superuser",
+            "roles",
+            "permissions",
+            "profile",
+        )
+
+    def get_roles(self, obj):
+        return list(obj.groups.values_list("name", flat=True))
+
+    def get_permissions(self, obj):
+        """
+        Return user permissions in frontend format:
+        app.resource.action
+
+        Includes both direct user permissions and group/role permissions.
+        """
+        if not obj.is_active:
+            return []
+
+        if obj.is_superuser:
+            permissions = Permission.objects.select_related("content_type").all()
+        else:
+            permission_strings = obj.get_all_permissions()
+            codenames_by_app = {}
+
+            for perm in permission_strings:
+                app_label, codename = perm.split(".", 1)
+                codenames_by_app.setdefault(app_label, set()).add(codename)
+
+            permissions = Permission.objects.select_related("content_type").filter(
+                content_type__app_label__in=codenames_by_app.keys()
+            )
+
+            permissions = [
+                permission
+                for permission in permissions
+                if permission.codename
+                in codenames_by_app.get(permission.content_type.app_label, set())
+            ]
+
+        return sorted(format_permission(permission) for permission in permissions)

@@ -1,11 +1,12 @@
 from rest_framework import viewsets
 from rest_framework.permissions import IsAdminUser, AllowAny
+from rest_framework_simplejwt.views import TokenObtainPairView
 from django.contrib.auth.models import Permission
 from .models import User, StaffProfile, Department, Role
 from rest_framework.permissions import DjangoModelPermissions
 from .serializers import (
     UserSerializer, StaffProfileSerializer, DepartmentSerializer, RoleSerializer,
-    PermissionSerializer
+    PermissionSerializer, CurrentUserSerializer, HolanTokenObtainPairSerializer
 )
 from rest_framework.generics import RetrieveAPIView
 from rest_framework.permissions import IsAuthenticated
@@ -24,6 +25,9 @@ class UserViewSet(viewsets.ModelViewSet):
     filterset_fields = ['email', 'first_name', 'last_name', 'is_staff']
     search_fields = ['username', 'email', 'first_name', 'last_name']
     ordering_fields = ['date_joined', 'username', 'email']
+
+class HolanTokenObtainPairView(TokenObtainPairView):
+    serializer_class = HolanTokenObtainPairSerializer
 
 class StaffProfileViewSet(viewsets.ModelViewSet):
     """API endpoint for staff profiles."""
@@ -71,7 +75,7 @@ class CurrentUserView(RetrieveAPIView):
     API endpoint to retrieve the currently authenticated user's data,
     including their linked staff profile.
     """
-    serializer_class = UserSerializer
+    serializer_class = CurrentUserSerializer
     permission_classes = [IsAuthenticated]
 
     def get_object(self):
