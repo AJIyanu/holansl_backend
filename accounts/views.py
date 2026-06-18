@@ -6,7 +6,8 @@ from .models import User, StaffProfile, Department, Role
 from rest_framework.permissions import DjangoModelPermissions
 from .serializers import (
     UserSerializer, StaffProfileSerializer, DepartmentSerializer, RoleSerializer,
-    PermissionSerializer, CurrentUserSerializer, HolanTokenObtainPairSerializer
+    PermissionSerializer, CurrentUserSerializer, HolanTokenObtainPairSerializer,
+    PasswordResetVerifySerializer, PasswordResetConfirmSerializer
 )
 from rest_framework.generics import RetrieveAPIView
 from rest_framework.permissions import IsAuthenticated
@@ -14,6 +15,10 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.decorators import api_view, permission_classes
 from django.http import JsonResponse
 from django.http import HttpResponse
+
+from rest_framework import status
+from rest_framework.response import Response
+from rest_framework.views import APIView
 
 class UserViewSet(viewsets.ModelViewSet):
     """API endpoint that allows users to be viewed or edited."""
@@ -28,6 +33,53 @@ class UserViewSet(viewsets.ModelViewSet):
 
 class HolanTokenObtainPairView(TokenObtainPairView):
     serializer_class = HolanTokenObtainPairSerializer
+
+class PasswordResetVerifyView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = PasswordResetVerifySerializer(
+            data=request.data,
+            context={"request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+
+        reset_code = serializer.validated_data["reset_code"]
+        user = reset_code.user
+
+        return Response(
+            {
+                "valid": True,
+                "user": {
+                    "id": str(user.id),
+                    "username": user.username,
+                    "email": user.email,
+                    "first_name": user.first_name,
+                    "last_name": user.last_name,
+                },
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class PasswordResetConfirmView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = PasswordResetConfirmSerializer(
+            data=request.data,
+            context={"request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+
+        return Response(
+            {
+                "detail": "Password reset successful. You can now login.",
+                "code": "password_reset_completed",
+            },
+            status=status.HTTP_200_OK,
+        )
 
 class StaffProfileViewSet(viewsets.ModelViewSet):
     """API endpoint for staff profiles."""

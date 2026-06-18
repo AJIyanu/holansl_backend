@@ -2,7 +2,7 @@ from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.contrib.auth.models import Group
 
-from .models import User, StaffProfile, Department, Role, AuditLog
+from .models import User, StaffProfile, Department, Role, AuditLog, PasswordResetCode
 
 # --- Inline Admin Definitions ---
 
@@ -41,6 +41,7 @@ class AuditLogAdmin(admin.ModelAdmin):
     list_display = (
         "created_at",
         "user",
+        "target_user",
         "username_attempted",
         "event_category",
         "event_type",
@@ -56,12 +57,15 @@ class AuditLogAdmin(admin.ModelAdmin):
     search_fields = (
         "user__username",
         "user__email",
+        "target_user__username",
+        "target_user__email",
         "username_attempted",
         "ip_address",
         "user_agent",
     )
     readonly_fields = (
         "user",
+        "target_user",
         "event_category",
         "event_type",
         "status",
@@ -74,6 +78,39 @@ class AuditLogAdmin(admin.ModelAdmin):
         "user_agent",
         "metadata",
         "created_at",
+    )
+
+@admin.register(PasswordResetCode)
+class PasswordResetCodeAdmin(admin.ModelAdmin):
+    list_display = (
+        "created_at",
+        "user",
+        "purpose",
+        "expires_at",
+        "opened_at",
+        "used_at",
+    )
+    list_filter = (
+        "purpose",
+        "created_at",
+        "expires_at",
+        "opened_at",
+        "used_at",
+    )
+    search_fields = (
+        "user__username",
+        "user__email",
+    )
+    readonly_fields = (
+        "user",
+        "token_hash",
+        "purpose",
+        "created_at",
+        "expires_at",
+        "opened_at",
+        "used_at",
+        "ip_address",
+        "user_agent",
     )
 
 # Unregister the default Group model and register our Role proxy model

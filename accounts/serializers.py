@@ -1,10 +1,22 @@
 from rest_framework import serializers
 from django.contrib.auth.models import Permission
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
-from rest_framework.exceptions import AuthenticationFailed
+from rest_framework.exceptions import AuthenticationFailed, ValidationError
 from django.contrib.auth import get_user_model
 
 from .models import User, StaffProfile, Department, Role, AuditLog
+
+from django.conf import settings
+from django.contrib.auth import get_user_model
+from django.contrib.auth.password_validation import validate_password
+from django.utils import timezone
+
+from .utils import (
+    create_audit_log,
+    create_password_reset_code,
+    get_valid_password_reset_code,
+    send_password_reset_email,
+)
 
 
 DJANGO_ACTION_MAP = {
@@ -64,47 +76,203 @@ class HolanTokenObtainPairSerializer(TokenObtainPairSerializer):
             self.log_failed_login(request=request, username=username, error=str(exc))
             raise exc
 
-        self.log_successful_login(request=request, user=self.user, username=username)
+        if self.user.must_change_password:
+            self.handle_default_password_login(request=request, username=username)
+            raise ValidationError(
+                {
+                    "detail": "Password change required. A reset link has been sent to your email.",
+                    "code": "password_change_required",
+                    "reset_required": True,
+                }
+            )
 
-        return data
-
-    def log_successful_login(self, request, user, username):
-        AuditLog.objects.create(
-            user=user,
+        create_audit_log(
+            user=self.user,
             event_category=AuditLog.EventCategory.AUTH,
             event_type=AuditLog.EventType.LOGIN_SUCCESS,
             status=AuditLog.EventStatus.SUCCESS,
             username_attempted=username,
-            ip_address=get_client_ip(request),
-            user_agent=get_user_agent(request),
+            request=request,
             metadata={
                 "path": request.path if request else "",
                 "method": request.method if request else "",
             },
         )
 
+        return data
+
     def log_failed_login(self, request, username, error):
-        User = get_user_model()
+        UserModel = get_user_model()
 
         user = (
-            User.objects.filter(username=username).first()
-            or User.objects.filter(email=username).first()
+            UserModel.objects.filter(username=username).first()
+            or UserModel.objects.filter(email=username).first()
         )
 
-        AuditLog.objects.create(
+        create_audit_log(
             user=user,
             event_category=AuditLog.EventCategory.AUTH,
             event_type=AuditLog.EventType.LOGIN_FAILED,
             status=AuditLog.EventStatus.FAILED,
             username_attempted=username,
-            ip_address=get_client_ip(request),
-            user_agent=get_user_agent(request),
+            request=request,
             metadata={
                 "error": error,
                 "path": request.path if request else "",
                 "method": request.method if request else "",
             },
         )
+
+    def handle_default_password_login(self, request, username):
+        reset_code, raw_token = create_password_reset_code(
+            self.user,
+            request=request,
+            purpose="DEFAULT_PASSWORD_CHANGE",
+        )
+
+        send_password_reset_email(self.user, raw_token)
+
+        create_audit_log(
+            user=self.user,
+            event_category=AuditLog.EventCategory.SECURITY,
+            event_type=AuditLog.EventType.DEFAULT_PASSWORD_LOGIN_BLOCKED,
+            status=AuditLog.EventStatus.FAILED,
+            username_attempted=username,
+            request=request,
+            metadata={
+                "reason": "User must change default password before login.",
+            },
+        )
+
+        create_audit_log(
+            user=self.user,
+            target_user=self.user,
+            event_category=AuditLog.EventCategory.SECURITY,
+            event_type=AuditLog.EventType.PASSWORD_RESET_LINK_SENT,
+            status=AuditLog.EventStatus.SUCCESS,
+            username_attempted=username,
+            request=request,
+            metadata={
+                "reset_code_id": str(reset_code.id),
+                "expires_at": reset_code.expires_at.isoformat(),
+            },
+        )
+
+class PasswordResetVerifySerializer(serializers.Serializer):
+    code = serializers.CharField(write_only=True)
+
+    def validate(self, attrs):
+        request = self.context.get("request")
+        raw_code = attrs["code"]
+
+        reset_code = get_valid_password_reset_code(raw_code)
+
+        if not reset_code:
+            create_audit_log(
+                event_category=AuditLog.EventCategory.SECURITY,
+                event_type=AuditLog.EventType.PASSWORD_RESET_FAILED,
+                status=AuditLog.EventStatus.FAILED,
+                request=request,
+                metadata={"reason": "Invalid or expired reset code."},
+            )
+            raise ValidationError(
+                {
+                    "detail": "Password reset link is invalid or has expired.",
+                    "code": "reset_link_invalid_or_expired",
+                }
+            )
+
+        if not reset_code.opened_at:
+            reset_code.opened_at = timezone.now()
+            reset_code.save(update_fields=["opened_at"])
+
+        create_audit_log(
+            user=reset_code.user,
+            target_user=reset_code.user,
+            event_category=AuditLog.EventCategory.SECURITY,
+            event_type=AuditLog.EventType.PASSWORD_RESET_CODE_VERIFIED,
+            status=AuditLog.EventStatus.SUCCESS,
+            request=request,
+            metadata={"reset_code_id": str(reset_code.id)},
+        )
+
+        attrs["reset_code"] = reset_code
+        return attrs
+
+
+class PasswordResetConfirmSerializer(serializers.Serializer):
+    code = serializers.CharField(write_only=True)
+    password = serializers.CharField(write_only=True)
+    password_confirm = serializers.CharField(write_only=True)
+
+    def validate(self, attrs):
+        request = self.context.get("request")
+        raw_code = attrs["code"]
+        password = attrs["password"]
+        password_confirm = attrs["password_confirm"]
+
+        reset_code = get_valid_password_reset_code(raw_code)
+
+        if not reset_code:
+            create_audit_log(
+                event_category=AuditLog.EventCategory.SECURITY,
+                event_type=AuditLog.EventType.PASSWORD_RESET_FAILED,
+                status=AuditLog.EventStatus.FAILED,
+                request=request,
+                metadata={"reason": "Invalid or expired reset code."},
+            )
+            raise ValidationError(
+                {
+                    "detail": "Password reset link is invalid or has expired.",
+                    "code": "reset_link_invalid_or_expired",
+                }
+            )
+
+        if password != password_confirm:
+            raise ValidationError(
+                {
+                    "password_confirm": "Passwords do not match.",
+                    "code": "password_mismatch",
+                }
+            )
+
+        if password == settings.DEFAULT_STAFF_PASSWORD:
+            raise ValidationError(
+                {
+                    "password": "You cannot use the default password as your new password.",
+                    "code": "default_password_not_allowed",
+                }
+            )
+
+        validate_password(password, user=reset_code.user)
+
+        attrs["reset_code"] = reset_code
+        return attrs
+
+    def save(self, **kwargs):
+        request = self.context.get("request")
+        reset_code = self.validated_data["reset_code"]
+        password = self.validated_data["password"]
+        user = reset_code.user
+
+        user.set_password(password)
+        user.must_change_password = False
+        user.save(update_fields=["password", "must_change_password"])
+
+        reset_code.used_at = timezone.now()
+        reset_code.save(update_fields=["used_at"])
+
+        create_audit_log(
+            user=user,
+            target_user=user,
+            event_category=AuditLog.EventCategory.SECURITY,
+            event_type=AuditLog.EventType.PASSWORD_RESET_COMPLETED,
+            status=AuditLog.EventStatus.SUCCESS,
+            request=request,
+            metadata={"reset_code_id": str(reset_code.id)},
+        )
+
+        return user
 
 class UserSerializer(serializers.ModelSerializer):
     """
@@ -128,9 +296,35 @@ class UserSerializer(serializers.ModelSerializer):
         }
     
     def create(self, validated_data):
-        roles = validated_data.pop('groups')
-        user = User.objects.create_user(**validated_data)
+        request = self.context.get("request")
+        roles = validated_data.pop("groups", [])
+
+        validated_data.pop("password", None)
+
+        user = User.objects.create_user(
+            **validated_data,
+            password=settings.DEFAULT_STAFF_PASSWORD,
+        )
+        user.must_change_password = True
+        user.save(update_fields=["must_change_password"])
+
         user.groups.set(roles)
+
+        create_audit_log(
+            user=request.user if request and request.user.is_authenticated else None,
+            target_user=user,
+            event_category=AuditLog.EventCategory.SECURITY,
+            event_type=AuditLog.EventType.ACCOUNT_CREATED,
+            status=AuditLog.EventStatus.SUCCESS,
+            request=request,
+            metadata={
+                "created_user_id": str(user.id),
+                "created_username": user.username,
+                "created_email": user.email,
+                "roles": list(user.groups.values_list("name", flat=True)),
+            },
+        )
+
         return user
     
     def update(self, instance, validated_data):
@@ -160,10 +354,39 @@ class StaffProfileSerializer(serializers.ModelSerializer):
         read_only_fields = ('employee_id',)
 
     def create(self, validated_data):
-        user_data = validated_data.pop('user', None)
-        if user_data:     
-            user = User.objects.create_user(**user_data)
+        request = self.context.get("request")
+        user_data = validated_data.pop("user", None)
+
+        if not user_data:
+            raise serializers.ValidationError({"user": "User details are required."})
+
+        user_data.pop("password", None)
+
+        user = User.objects.create_user(
+            **user_data,
+            password=settings.DEFAULT_STAFF_PASSWORD,
+        )
+        user.must_change_password = True
+        user.save(update_fields=["must_change_password"])
+
         profile = StaffProfile.objects.create(user=user, **validated_data)
+
+        create_audit_log(
+            user=request.user if request and request.user.is_authenticated else None,
+            target_user=user,
+            event_category=AuditLog.EventCategory.SECURITY,
+            event_type=AuditLog.EventType.ACCOUNT_CREATED,
+            status=AuditLog.EventStatus.SUCCESS,
+            request=request,
+            metadata={
+                "created_user_id": str(user.id),
+                "created_username": user.username,
+                "created_email": user.email,
+                "profile_id": str(profile.id),
+                "department_id": str(profile.department_id) if profile.department_id else None,
+            },
+        )
+
         return profile
 
 UserSerializer.profile = StaffProfileSerializer(read_only=True, source='profile')

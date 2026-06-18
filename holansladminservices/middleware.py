@@ -9,10 +9,10 @@ def header_debug_middleware(get_response):
                 return value[:10] + "...[redacted]"
             return value
 
-        print("🔍 DEBUG HEADERS START 🔍")
-        for k, v in request.headers.items():
-            print(f"{k}: {safe_value(k, v)}")
-        print("🔍 DEBUG HEADERS END 🔍\n")
+        # print("🔍 DEBUG HEADERS START 🔍")
+        # for k, v in request.headers.items():
+        #     print(f"{k}: {safe_value(k, v)}")
+        # print("🔍 DEBUG HEADERS END 🔍\n")
 
         return get_response(request)
     return middleware

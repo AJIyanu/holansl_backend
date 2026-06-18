@@ -13,6 +13,7 @@ class User(AbstractUser):
     """
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     email = models.EmailField(_('email address'), unique=True)
+    must_change_password = models.BooleanField(default=False)
 
     def __str__(self):
         return self.username
@@ -128,6 +129,19 @@ class AuditLog(models.Model):
         LOGIN_FAILED = "LOGIN_FAILED", "Login Failed"
         LOGOUT = "LOGOUT", "Logout"
 
+        ACCOUNT_CREATED = "ACCOUNT_CREATED", "Account Created"
+        DEFAULT_PASSWORD_LOGIN_BLOCKED = (
+            "DEFAULT_PASSWORD_LOGIN_BLOCKED",
+            "Default Password Login Blocked",
+        )
+        PASSWORD_RESET_LINK_SENT = "PASSWORD_RESET_LINK_SENT", "Password Reset Link Sent"
+        PASSWORD_RESET_CODE_VERIFIED = (
+            "PASSWORD_RESET_CODE_VERIFIED",
+            "Password Reset Code Verified",
+        )
+        PASSWORD_RESET_COMPLETED = "PASSWORD_RESET_COMPLETED", "Password Reset Completed"
+        PASSWORD_RESET_FAILED = "PASSWORD_RESET_FAILED", "Password Reset Failed"
+
         CREATE = "CREATE", "Create"
         READ = "READ", "Read"
         UPDATE = "UPDATE", "Update"
@@ -143,6 +157,16 @@ class AuditLog(models.Model):
         null=True,
         blank=True,
         related_name="audit_logs",
+        help_text="The user who performed the action.",
+    )
+
+    target_user = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="targeted_audit_logs",
+        help_text="The user affected by the action, if applicable.",
     )
 
     event_category = models.CharField(
@@ -152,7 +176,7 @@ class AuditLog(models.Model):
     )
 
     event_type = models.CharField(
-        max_length=50,
+        max_length=80,
         choices=EventType.choices,
     )
 
@@ -167,44 +191,15 @@ class AuditLog(models.Model):
         help_text="Username/email submitted during login attempt.",
     )
 
-    app_label = models.CharField(
-        max_length=100,
-        blank=True,
-        help_text="For future CRUD logs, e.g. crm, procurement, ledger.",
-    )
+    app_label = models.CharField(max_length=100, blank=True)
+    resource = models.CharField(max_length=100, blank=True)
+    action = models.CharField(max_length=100, blank=True)
+    object_id = models.CharField(max_length=100, blank=True)
 
-    resource = models.CharField(
-        max_length=100,
-        blank=True,
-        help_text="For future CRUD logs, e.g. party, clientrequest, transaction.",
-    )
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.TextField(blank=True)
 
-    action = models.CharField(
-        max_length=100,
-        blank=True,
-        help_text="For future CRUD logs, e.g. create, view, edit, delete.",
-    )
-
-    object_id = models.CharField(
-        max_length=100,
-        blank=True,
-        help_text="Affected object ID for future CRUD logs.",
-    )
-
-    ip_address = models.GenericIPAddressField(
-        null=True,
-        blank=True,
-    )
-
-    user_agent = models.TextField(
-        blank=True,
-    )
-
-    metadata = models.JSONField(
-        default=dict,
-        blank=True,
-        help_text="Extra details such as error reason, request path, etc.",
-    )
+    metadata = models.JSONField(default=dict, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -212,10 +207,56 @@ class AuditLog(models.Model):
         ordering = ["-created_at"]
         indexes = [
             models.Index(fields=["user", "-created_at"], name="audit_user_created_idx"),
+            models.Index(fields=["target_user", "-created_at"], name="audit_target_created_idx"),
             models.Index(fields=["event_type", "-created_at"], name="audit_event_created_idx"),
             models.Index(fields=["event_category", "-created_at"], name="audit_cat_created_idx"),
         ]
 
     def __str__(self):
-        username = self.user.username if self.user else self.username_attempted or "Unknown user"
-        return f"{self.event_type} - {username} - {self.created_at}"
+        actor = self.user.username if self.user else self.username_attempted or "System"
+        return f"{self.event_type} - {actor} - {self.created_at}"
+
+class PasswordResetCode(models.Model):
+    class Purpose(models.TextChoices):
+        DEFAULT_PASSWORD_CHANGE = (
+            "DEFAULT_PASSWORD_CHANGE",
+            "Default Password Change",
+        )
+        PASSWORD_RESET = "PASSWORD_RESET", "Password Reset"
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="password_reset_codes",
+    )
+
+    token_hash = models.CharField(max_length=128, unique=True)
+
+    purpose = models.CharField(
+        max_length=50,
+        choices=Purpose.choices,
+        default=Purpose.DEFAULT_PASSWORD_CHANGE,
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    opened_at = models.DateTimeField(null=True, blank=True)
+    used_at = models.DateTimeField(null=True, blank=True)
+
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["user", "-created_at"], name="reset_user_created_idx"),
+            models.Index(fields=["token_hash"], name="reset_token_hash_idx"),
+            models.Index(fields=["expires_at"], name="reset_expires_idx"),
+        ]
+
+    def __str__(self):
+        return f"{self.user} - {self.purpose} - {self.created_at}"
+
+    @property
+    def is_used(self):
+        return self.used_at is not None

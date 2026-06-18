@@ -218,3 +218,25 @@ if not DEBUG:
     SECURE_CONTENT_TYPE_NOSNIFF = True
     X_FRAME_OPTIONS = "DENY"
     REFERRER_POLICY = "same-origin"
+
+
+
+# --------------------------------------------------------
+# ENVIRONMENT-BASED CONFIGURATION
+# --------------------------------------------------------
+
+DEFAULT_STAFF_PASSWORD = os.getenv("DEFAULT_STAFF_PASSWORD", "SecureDefaultPassword123!")
+PASSWORD_RESET_EXPIRY_MINUTES = int(os.getenv("PASSWORD_RESET_EXPIRY_MINUTES", "15"))
+FRONTEND_URL = os.getenv("FRONTEND_URL", "https://admin.holansl.com")
+
+EMAIL_BACKEND = os.getenv(
+    "EMAIL_BACKEND",
+    "django.core.mail.backends.console.EmailBackend",
+)
+EMAIL_HOST = os.getenv("EMAIL_HOST", "")
+EMAIL_PORT = int(os.getenv("EMAIL_PORT", "587"))
+EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
+EMAIL_USE_SSL = True
+EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "True") == "True"
+DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "noreply@holansl.com")
