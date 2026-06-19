@@ -87,20 +87,17 @@ class HolanTokenObtainPairSerializer(TokenObtainPairSerializer):
             )
 
         create_audit_log(
-                user=self.user,
-                target_user=self.user,
-                event_category=AuditLog.EventCategory.SECURITY,
-                event_type=AuditLog.EventType.PASSWORD_RESET_LINK_SENT,
-                status=AuditLog.EventStatus.SUCCESS,
-                username_attempted=username,
-                request=request,
-                metadata={
-                    "reset_code_id": str(reset_code.id),
-                    "expires_at": reset_code.expires_at.isoformat(),
-                    "email_id": email_result.get("email_id"),
-                    "purpose": reset_code.purpose,
-                },
-)
+            user=self.user,
+            event_category=AuditLog.EventCategory.AUTH,
+            event_type=AuditLog.EventType.LOGIN_SUCCESS,
+            status=AuditLog.EventStatus.SUCCESS,
+            username_attempted=username,
+            request=request,
+            metadata={
+                "path": request.path if request else "",
+                "method": request.method if request else "",
+            },
+        )
 
         return data
 
