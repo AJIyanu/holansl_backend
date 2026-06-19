@@ -4,7 +4,7 @@ from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework.exceptions import AuthenticationFailed, ValidationError
 from django.contrib.auth import get_user_model
 
-from .models import User, StaffProfile, Department, Role, AuditLog
+from .models import User, StaffProfile, Department, Role, AuditLog, PasswordResetCode
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
@@ -87,17 +87,20 @@ class HolanTokenObtainPairSerializer(TokenObtainPairSerializer):
             )
 
         create_audit_log(
-            user=self.user,
-            event_category=AuditLog.EventCategory.AUTH,
-            event_type=AuditLog.EventType.LOGIN_SUCCESS,
-            status=AuditLog.EventStatus.SUCCESS,
-            username_attempted=username,
-            request=request,
-            metadata={
-                "path": request.path if request else "",
-                "method": request.method if request else "",
-            },
-        )
+                user=self.user,
+                target_user=self.user,
+                event_category=AuditLog.EventCategory.SECURITY,
+                event_type=AuditLog.EventType.PASSWORD_RESET_LINK_SENT,
+                status=AuditLog.EventStatus.SUCCESS,
+                username_attempted=username,
+                request=request,
+                metadata={
+                    "reset_code_id": str(reset_code.id),
+                    "expires_at": reset_code.expires_at.isoformat(),
+                    "email_id": email_result.get("email_id"),
+                    "purpose": reset_code.purpose,
+                },
+)
 
         return data
 
@@ -127,10 +130,44 @@ class HolanTokenObtainPairSerializer(TokenObtainPairSerializer):
         reset_code, raw_token = create_password_reset_code(
             self.user,
             request=request,
-            purpose="DEFAULT_PASSWORD_CHANGE",
+            purpose=PasswordResetCode.Purpose.DEFAULT_PASSWORD_CHANGE,
         )
 
-        send_password_reset_email(self.user, raw_token)
+        try:
+            email_result = send_password_reset_email(
+                self.user,
+                raw_token,
+                purpose=PasswordResetCode.Purpose.DEFAULT_PASSWORD_CHANGE,
+            )
+        except Exception:
+            reset_code.delete()
+
+            create_audit_log(
+                user=self.user,
+                target_user=self.user,
+                event_category=AuditLog.EventCategory.SECURITY,
+                event_type=AuditLog.EventType.PASSWORD_RESET_EMAIL_FAILED,
+                status=AuditLog.EventStatus.FAILED,
+                username_attempted=username,
+                request=request,
+                metadata={
+                    "reason": "Resend failed to accept the email.",
+                    "purpose": (
+                        PasswordResetCode.Purpose.DEFAULT_PASSWORD_CHANGE
+                    ),
+                },
+            )
+
+            raise ValidationError(
+                {
+                    "detail": (
+                        "Password change is required, but the reset email "
+                        "could not be sent. Please try again."
+                    ),
+                    "code": "password_reset_email_failed",
+                    "reset_required": True,
+                }
+            )
 
         create_audit_log(
             user=self.user,
@@ -155,6 +192,8 @@ class HolanTokenObtainPairSerializer(TokenObtainPairSerializer):
             metadata={
                 "reset_code_id": str(reset_code.id),
                 "expires_at": reset_code.expires_at.isoformat(),
+                "email_id": email_result.get("email_id"),
+                "purpose": reset_code.purpose,
             },
         )
 
@@ -270,6 +309,108 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
             status=AuditLog.EventStatus.SUCCESS,
             request=request,
             metadata={"reset_code_id": str(reset_code.id)},
+        )
+
+        return user
+
+class ForgotPasswordSerializer(serializers.Serializer):
+    email = serializers.EmailField(write_only=True)
+
+    def validate_email(self, value):
+        return value.strip().lower()
+
+    def save(self, **kwargs):
+        request = self.context.get("request")
+        email = self.validated_data["email"]
+
+        UserModel = get_user_model()
+
+        user = UserModel.objects.filter(
+            email__iexact=email,
+            is_active=True,
+        ).first()
+
+        # Do not disclose whether the account exists.
+        if not user:
+            create_audit_log(
+                event_category=AuditLog.EventCategory.SECURITY,
+                event_type=AuditLog.EventType.PASSWORD_RESET_REQUESTED,
+                status=AuditLog.EventStatus.SUCCESS,
+                username_attempted=email,
+                request=request,
+                metadata={
+                    "account_found": False,
+                    "response_obscured": True,
+                },
+            )
+            return None
+
+        create_audit_log(
+            user=user,
+            target_user=user,
+            event_category=AuditLog.EventCategory.SECURITY,
+            event_type=AuditLog.EventType.PASSWORD_RESET_REQUESTED,
+            status=AuditLog.EventStatus.SUCCESS,
+            username_attempted=email,
+            request=request,
+            metadata={
+                "account_found": True,
+                "purpose": PasswordResetCode.Purpose.PASSWORD_RESET,
+            },
+        )
+
+        reset_code, raw_token = create_password_reset_code(
+            user,
+            request=request,
+            purpose=PasswordResetCode.Purpose.PASSWORD_RESET,
+        )
+
+        try:
+            email_result = send_password_reset_email(
+                user,
+                raw_token,
+                purpose=PasswordResetCode.Purpose.PASSWORD_RESET,
+            )
+        except Exception:
+            reset_code.delete()
+
+            create_audit_log(
+                user=user,
+                target_user=user,
+                event_category=AuditLog.EventCategory.SECURITY,
+                event_type=AuditLog.EventType.PASSWORD_RESET_EMAIL_FAILED,
+                status=AuditLog.EventStatus.FAILED,
+                username_attempted=email,
+                request=request,
+                metadata={
+                    "reason": "Resend failed to accept the email.",
+                    "purpose": PasswordResetCode.Purpose.PASSWORD_RESET,
+                },
+            )
+            raise serializers.ValidationError(
+                {
+                    "detail": (
+                        "The password reset request could not be "
+                        "processed. Please try again."
+                    ),
+                    "code": "password_reset_email_failed",
+                }
+            )
+
+        create_audit_log(
+            user=user,
+            target_user=user,
+            event_category=AuditLog.EventCategory.SECURITY,
+            event_type=AuditLog.EventType.PASSWORD_RESET_LINK_SENT,
+            status=AuditLog.EventStatus.SUCCESS,
+            username_attempted=email,
+            request=request,
+            metadata={
+                "reset_code_id": str(reset_code.id),
+                "expires_at": reset_code.expires_at.isoformat(),
+                "email_id": email_result.get("email_id"),
+                "purpose": reset_code.purpose,
+            },
         )
 
         return user

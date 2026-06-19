@@ -9,6 +9,7 @@ from .views import (
     CurrentUserView,
     PasswordResetVerifyView,
     PasswordResetConfirmView,
+    ForgotPasswordView,
     health_check,
 )
 
@@ -36,4 +37,9 @@ urlpatterns = [
         name="password-reset-confirm",
     ),
     path("health/", health_check, name="health_check"),
+    path(
+        "password-reset/request/",
+        ForgotPasswordView.as_view(),
+        name="password-reset-request",
+    ),
 ]

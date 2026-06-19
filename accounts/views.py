@@ -7,7 +7,7 @@ from rest_framework.permissions import DjangoModelPermissions
 from .serializers import (
     UserSerializer, StaffProfileSerializer, DepartmentSerializer, RoleSerializer,
     PermissionSerializer, CurrentUserSerializer, HolanTokenObtainPairSerializer,
-    PasswordResetVerifySerializer, PasswordResetConfirmSerializer
+    PasswordResetVerifySerializer, PasswordResetConfirmSerializer, ForgotPasswordSerializer
 )
 from rest_framework.generics import RetrieveAPIView
 from rest_framework.permissions import IsAuthenticated
@@ -77,6 +77,29 @@ class PasswordResetConfirmView(APIView):
             {
                 "detail": "Password reset successful. You can now login.",
                 "code": "password_reset_completed",
+            },
+            status=status.HTTP_200_OK,
+        )
+
+class ForgotPasswordView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def post(self, request):
+        serializer = ForgotPasswordSerializer(
+            data=request.data,
+            context={"request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+
+        return Response(
+            {
+                "detail": (
+                    "If an active account exists for that email address, "
+                    "a password reset link has been sent."
+                ),
+                "code": "password_reset_requested",
             },
             status=status.HTTP_200_OK,
         )

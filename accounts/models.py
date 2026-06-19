@@ -141,6 +141,14 @@ class AuditLog(models.Model):
         )
         PASSWORD_RESET_COMPLETED = "PASSWORD_RESET_COMPLETED", "Password Reset Completed"
         PASSWORD_RESET_FAILED = "PASSWORD_RESET_FAILED", "Password Reset Failed"
+        PASSWORD_RESET_REQUESTED = (
+            "PASSWORD_RESET_REQUESTED",
+            "Password Reset Requested",
+        )
+        PASSWORD_RESET_EMAIL_FAILED = (
+            "PASSWORD_RESET_EMAIL_FAILED",
+            "Password Reset Email Failed",
+        )
 
         CREATE = "CREATE", "Create"
         READ = "READ", "Read"
