@@ -11,6 +11,8 @@ from .views import (
     PasswordResetConfirmView,
     ForgotPasswordView,
     health_check,
+    AuditLogViewSet,
+    LoginActivityViewSet,
 )
 
 # Create a router and register our viewsets with it.
@@ -20,6 +22,17 @@ router.register(r'profiles', StaffProfileViewSet)
 router.register(r'departments', DepartmentViewSet)
 router.register(r'roles', RoleViewSet)
 router.register(r'permissions', PermissionViewSet)
+router.register(
+    r"audit-logs",
+    AuditLogViewSet,
+    basename="audit-log",
+)
+
+router.register(
+    r"login-activity",
+    LoginActivityViewSet,
+    basename="login-activity",
+)
 
 
 # The API URLs are now determined automatically by the router.

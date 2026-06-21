@@ -179,6 +179,15 @@ SPECTACULAR_SETTINGS = {
     'SERVE_INCLUDE_SCHEMA': False,
 }
 
+STAFF_MANAGEMENT_ROLES = {
+    role.strip().casefold()
+    for role in os.getenv(
+        "STAFF_MANAGEMENT_ROLES",
+        "CEO,CTO",
+    ).split(",")
+    if role.strip()
+}
+
 STATIC_URL = '/static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 

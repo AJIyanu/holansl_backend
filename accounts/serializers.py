@@ -194,6 +194,103 @@ class HolanTokenObtainPairSerializer(TokenObtainPairSerializer):
             },
         )
 
+class RoleSummarySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Role
+        fields = ("id", "name")
+
+
+class DepartmentSummarySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Department
+        fields = ("id", "name", "code")
+
+
+class UserSummarySerializer(serializers.ModelSerializer):
+    roles = RoleSummarySerializer(
+        source="groups",
+        many=True,
+        read_only=True,
+    )
+
+    class Meta:
+        model = User
+        fields = (
+            "id",
+            "username",
+            "email",
+            "first_name",
+            "last_name",
+            "is_active",
+            "is_staff",
+            "roles",
+        )
+
+
+class StaffProfileReadSerializer(serializers.ModelSerializer):
+    user = UserSummarySerializer(read_only=True)
+    department = DepartmentSummarySerializer(read_only=True)
+
+    class Meta:
+        model = StaffProfile
+        fields = (
+            "id",
+            "employee_id",
+            "job_title",
+            "employment_type",
+            "start_date",
+            "end_date",
+            "phone_number",
+            "address",
+            "middle_name",
+            "sex",
+            "date_of_birth",
+            "nationality",
+            "department",
+            "user",
+        )
+
+
+class UserWriteSerializer(serializers.ModelSerializer):
+    roles = serializers.PrimaryKeyRelatedField(
+        source="groups",
+        queryset=Role.objects.all(),
+        many=True,
+        required=False,
+    )
+
+    class Meta:
+        model = User
+        fields = (
+            "id",
+            "username",
+            "email",
+            "first_name",
+            "last_name",
+            "is_active",
+            "is_staff",
+            "roles",
+        )
+        read_only_fields = ("id",)
+
+    def to_internal_value(self, data):
+        mutable_data = data.copy()
+
+        # Silently discard password from this endpoint.
+        mutable_data.pop("password", None)
+
+        return super().to_internal_value(mutable_data)
+
+    def update(self, instance, validated_data):
+        roles = validated_data.pop("groups", None)
+
+        instance = super().update(instance, validated_data)
+
+        if roles is not None:
+            instance.groups.set(roles)
+
+        return instance
+
 class PasswordResetVerifySerializer(serializers.Serializer):
     code = serializers.CharField(write_only=True)
 
@@ -483,34 +580,105 @@ class UserCreateNestedSerializer(serializers.ModelSerializer):
             'password': {'write_only': True, 'style': {'input_type': 'password'}}
         }
 
-class StaffProfileSerializer(serializers.ModelSerializer):
-    user = UserCreateNestedSerializer(write_only=True)
-    user_details = UserSerializer(source='user', read_only=True)
+class StaffProfileWriteSerializer(serializers.ModelSerializer):
+    user = UserCreateNestedSerializer(write_only=True, required=False)
+
+    roles = serializers.PrimaryKeyRelatedField(
+        queryset=Role.objects.all(),
+        many=True,
+        write_only=True,
+        required=False,
+    )
+
+    is_active = serializers.BooleanField(
+        write_only=True,
+        required=False,
+    )
+
+    is_staff = serializers.BooleanField(
+        write_only=True,
+        required=False,
+    )
+
+    department = serializers.PrimaryKeyRelatedField(
+        queryset=Department.objects.all(),
+        required=False,
+        allow_null=True,
+    )
+
     class Meta:
         model = StaffProfile
-        fields = '__all__'
-        read_only_fields = ('employee_id',)
+        fields = (
+            "id",
+            "user",
+            "employee_id",
+            "job_title",
+            "employment_type",
+            "start_date",
+            "end_date",
+            "phone_number",
+            "address",
+            "middle_name",
+            "sex",
+            "date_of_birth",
+            "nationality",
+            "department",
+            "roles",
+            "is_active",
+            "is_staff",
+        )
+        read_only_fields = ("id", "employee_id")
+
+    def to_internal_value(self, data):
+        mutable_data = data.copy()
+
+        mutable_data.pop("password", None)
+
+        user_data = mutable_data.get("user")
+        if isinstance(user_data, dict):
+            user_data = user_data.copy()
+            user_data.pop("password", None)
+            mutable_data["user"] = user_data
+
+        return super().to_internal_value(mutable_data)
 
     def create(self, validated_data):
         request = self.context.get("request")
+
         user_data = validated_data.pop("user", None)
+        roles = validated_data.pop("roles", [])
+        validated_data.pop("is_active", None)
+        validated_data.pop("is_staff", None)
 
         if not user_data:
-            raise serializers.ValidationError({"user": "User details are required."})
-
-        user_data.pop("password", None)
+            raise serializers.ValidationError(
+                {"user": "User details are required."}
+            )
 
         user = User.objects.create_user(
             **user_data,
             password=settings.DEFAULT_STAFF_PASSWORD,
+            is_staff=True,
+            is_active=True,
         )
+
         user.must_change_password = True
         user.save(update_fields=["must_change_password"])
 
-        profile = StaffProfile.objects.create(user=user, **validated_data)
+        if roles:
+            user.groups.set(roles)
+
+        profile = StaffProfile.objects.create(
+            user=user,
+            **validated_data,
+        )
 
         create_audit_log(
-            user=request.user if request and request.user.is_authenticated else None,
+            user=(
+                request.user
+                if request and request.user.is_authenticated
+                else None
+            ),
             target_user=user,
             event_category=AuditLog.EventCategory.SECURITY,
             event_type=AuditLog.EventType.ACCOUNT_CREATED,
@@ -521,13 +689,50 @@ class StaffProfileSerializer(serializers.ModelSerializer):
                 "created_username": user.username,
                 "created_email": user.email,
                 "profile_id": str(profile.id),
-                "department_id": str(profile.department_id) if profile.department_id else None,
+                "department_id": (
+                    str(profile.department_id)
+                    if profile.department_id
+                    else None
+                ),
+                "roles": list(
+                    user.groups.values_list("name", flat=True)
+                ),
             },
         )
 
         return profile
 
-UserSerializer.profile = StaffProfileSerializer(read_only=True, source='profile')
+    def update(self, instance, validated_data):
+        roles = validated_data.pop("roles", None)
+        is_active = validated_data.pop("is_active", None)
+        is_staff = validated_data.pop("is_staff", None)
+
+        # User creation data is not used during profile update.
+        validated_data.pop("user", None)
+
+        instance = super().update(instance, validated_data)
+
+        user_changed = False
+
+        if is_active is not None:
+            instance.user.is_active = is_active
+            user_changed = True
+
+        if is_staff is not None:
+            instance.user.is_staff = is_staff
+            user_changed = True
+
+        if user_changed:
+            instance.user.save(
+                update_fields=["is_active", "is_staff"]
+            )
+
+        if roles is not None:
+            instance.user.groups.set(roles)
+
+        return instance
+
+UserSerializer.profile = StaffProfileWriteSerializer(read_only=True, source='profile')
 
 class DepartmentSerializer(serializers.ModelSerializer):
     class Meta:
@@ -555,7 +760,7 @@ class RoleSerializer(serializers.ModelSerializer):
 class CurrentUserSerializer(serializers.ModelSerializer):
     roles = serializers.SerializerMethodField()
     permissions = serializers.SerializerMethodField()
-    profile = StaffProfileSerializer(read_only=True)
+    profile = StaffProfileWriteSerializer(read_only=True)
 
     class Meta:
         model = User
@@ -607,3 +812,41 @@ class CurrentUserSerializer(serializers.ModelSerializer):
             ]
 
         return sorted(format_permission(permission) for permission in permissions)
+
+
+class AuditUserSummarySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = (
+            "id",
+            "username",
+            "email",
+            "first_name",
+            "last_name",
+        )
+
+
+class AuditLogSerializer(serializers.ModelSerializer):
+    user = AuditUserSummarySerializer(read_only=True)
+    target_user = AuditUserSummarySerializer(read_only=True)
+
+    class Meta:
+        model = AuditLog
+        fields = (
+            "id",
+            "user",
+            "target_user",
+            "event_category",
+            "event_type",
+            "status",
+            "username_attempted",
+            "app_label",
+            "resource",
+            "action",
+            "object_id",
+            "ip_address",
+            "user_agent",
+            "metadata",
+            "created_at",
+        )
+        read_only_fields = fields

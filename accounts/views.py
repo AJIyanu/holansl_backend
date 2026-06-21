@@ -5,9 +5,10 @@ from django.contrib.auth.models import Permission
 from .models import User, StaffProfile, Department, Role
 from rest_framework.permissions import DjangoModelPermissions
 from .serializers import (
-    UserSerializer, StaffProfileSerializer, DepartmentSerializer, RoleSerializer,
+    UserSerializer, DepartmentSerializer, RoleSerializer, UserWriteSerializer,
     PermissionSerializer, CurrentUserSerializer, HolanTokenObtainPairSerializer,
-    PasswordResetVerifySerializer, PasswordResetConfirmSerializer, ForgotPasswordSerializer
+    PasswordResetVerifySerializer, PasswordResetConfirmSerializer, ForgotPasswordSerializer,
+    AuditLogSerializer, StaffProfileReadSerializer, StaffProfileWriteSerializer, UserSummarySerializer,
 )
 from rest_framework.generics import RetrieveAPIView
 from rest_framework.permissions import IsAuthenticated
@@ -20,16 +21,101 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from rest_framework.exceptions import PermissionDenied
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.request import clone_request
+
+from .models import AuditLog
+from .permissions import (
+    CanViewAuditLogs,
+    can_manage_staff_security,
+)
+from .serializers import (
+    AuditLogSerializer,
+    StaffProfileReadSerializer,
+    StaffProfileWriteSerializer,
+    UserSummarySerializer,
+    UserWriteSerializer,
+)
+
 class UserViewSet(viewsets.ModelViewSet):
-    """API endpoint that allows users to be viewed or edited."""
-    queryset = User.objects.all().order_by('-date_joined')
-    serializer_class = UserSerializer
-    permission_classes = [IsAdminUser, DjangoModelPermissions]
-    
-    # --- Filtering, Search, and Ordering ---
-    filterset_fields = ['email', 'first_name', 'last_name', 'is_staff']
-    search_fields = ['username', 'email', 'first_name', 'last_name']
-    ordering_fields = ['date_joined', 'username', 'email']
+    queryset = (
+        User.objects
+        .prefetch_related("groups")
+        .all()
+        .order_by("-date_joined")
+    )
+
+    permission_classes = [
+        IsAdminUser,
+        DjangoModelPermissions,
+    ]
+
+    filterset_fields = [
+        "email",
+        "first_name",
+        "last_name",
+        "is_staff",
+        "is_active",
+        "groups",
+    ]
+
+    search_fields = [
+        "username",
+        "email",
+        "first_name",
+        "last_name",
+        "groups__name",
+    ]
+
+    ordering_fields = [
+        "date_joined",
+        "username",
+        "email",
+        "is_active",
+        "is_staff",
+    ]
+
+    def get_serializer_class(self):
+        if self.action in ("list", "retrieve"):
+            return UserSummarySerializer
+
+        return UserWriteSerializer
+
+    def update(self, request, *args, **kwargs):
+        if not request.user.is_superuser:
+            raise PermissionDenied(
+                "You do not have permission to perform this operation."
+            )
+
+        return super().update(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        privileged_fields = {
+            "is_active",
+            "is_staff",
+            "roles",
+        }
+
+        requested_fields = set(request.data.keys())
+
+        if (
+            requested_fields & privileged_fields
+            and not can_manage_staff_security(request.user)
+        ):
+            raise PermissionDenied(
+                "You do not have permission to perform this operation."
+            )
+
+        return super().partial_update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        if not request.user.is_superuser:
+            raise PermissionDenied(
+                "You do not have permission to perform this operation."
+            )
+
+        return super().destroy(request, *args, **kwargs)
 
 class HolanTokenObtainPairView(TokenObtainPairView):
     serializer_class = HolanTokenObtainPairSerializer
@@ -105,15 +191,88 @@ class ForgotPasswordView(APIView):
         )
 
 class StaffProfileViewSet(viewsets.ModelViewSet):
-    """API endpoint for staff profiles."""
-    queryset = StaffProfile.objects.all()
-    serializer_class = StaffProfileSerializer
-    permission_classes = [IsAdminUser, DjangoModelPermissions]
+    queryset = (
+        StaffProfile.objects
+        .select_related("user", "department")
+        .prefetch_related("user__groups")
+        .all()
+    )
 
-    # --- Filtering, Search, and Ordering ---
-    filterset_fields = ['job_title', 'employment_type', 'department']
-    search_fields = ['job_title', 'phone_number', 'user__username', 'user__first_name']
-    ordering_fields = ['start_date', 'job_title']
+    permission_classes = [
+        IsAdminUser,
+        DjangoModelPermissions,
+    ]
+
+    filterset_fields = [
+        "job_title",
+        "employment_type",
+        "department",
+        "user__is_active",
+        "user__is_staff",
+        "user__groups",
+    ]
+
+    search_fields = [
+        "employee_id",
+        "job_title",
+        "phone_number",
+        "user__username",
+        "user__email",
+        "user__first_name",
+        "user__last_name",
+        "department__name",
+        "user__groups__name",
+    ]
+
+    ordering_fields = [
+        "start_date",
+        "job_title",
+        "employee_id",
+        "user__first_name",
+        "user__last_name",
+    ]
+
+    def get_serializer_class(self):
+        if self.action in ("list", "retrieve"):
+            return StaffProfileReadSerializer
+
+        return StaffProfileWriteSerializer
+
+    def update(self, request, *args, **kwargs):
+        if not request.user.is_superuser:
+            raise PermissionDenied(
+                "You do not have permission to perform this operation."
+            )
+
+        return super().update(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        privileged_fields = {
+            "department",
+            "is_active",
+            "is_staff",
+            "roles",
+        }
+
+        requested_fields = set(request.data.keys())
+
+        if (
+            requested_fields & privileged_fields
+            and not can_manage_staff_security(request.user)
+        ):
+            raise PermissionDenied(
+                "You do not have permission to perform this operation."
+            )
+
+        return super().partial_update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        if not request.user.is_superuser:
+            raise PermissionDenied(
+                "You do not have permission to perform this operation."
+            )
+
+        return super().destroy(request, *args, **kwargs)
 
 class DepartmentViewSet(viewsets.ModelViewSet):
     """API endpoint for departments."""
@@ -155,6 +314,71 @@ class CurrentUserView(RetrieveAPIView):
 
     def get_object(self):
         return self.request.user
+
+class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = (
+        AuditLog.objects
+        .select_related("user", "target_user")
+        .all()
+    )
+    serializer_class = AuditLogSerializer
+    permission_classes = [IsAuthenticated, CanViewAuditLogs]
+
+    filterset_fields = [
+        "user",
+        "target_user",
+        "event_category",
+        "event_type",
+        "status",
+        "app_label",
+        "resource",
+        "action",
+    ]
+
+    search_fields = [
+        "user__username",
+        "user__email",
+        "target_user__username",
+        "target_user__email",
+        "username_attempted",
+        "object_id",
+    ]
+
+    ordering_fields = ["created_at", "event_type", "status"]
+
+
+class LoginActivityViewSet(viewsets.ReadOnlyModelViewSet):
+    serializer_class = AuditLogSerializer
+    permission_classes = [IsAuthenticated, CanViewAuditLogs]
+
+    filterset_fields = [
+        "user",
+        "status",
+        "event_type",
+    ]
+
+    search_fields = [
+        "user__username",
+        "user__email",
+        "username_attempted",
+        "ip_address",
+    ]
+
+    ordering_fields = ["created_at", "event_type", "status"]
+
+    def get_queryset(self):
+        return (
+            AuditLog.objects
+            .select_related("user", "target_user")
+            .filter(
+                event_type__in=[
+                    AuditLog.EventType.LOGIN_SUCCESS,
+                    AuditLog.EventType.LOGIN_FAILED,
+                    AuditLog.EventType.LOGOUT,
+                    AuditLog.EventType.DEFAULT_PASSWORD_LOGIN_BLOCKED,
+                ]
+            )
+        )
 
 
 @api_view(['GET', 'HEAD'])
