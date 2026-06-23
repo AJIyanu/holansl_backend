@@ -10,8 +10,7 @@ def can_manage_staff_security(user):
         return True
 
     user_roles = {
-        name.casefold()
-        for name in user.groups.values_list("name", flat=True)
+        name.casefold() for name in user.groups.values_list("name", flat=True)
     }
 
     return bool(user_roles & settings.STAFF_MANAGEMENT_ROLES)
@@ -33,3 +32,15 @@ class CanViewAuditLogs(BasePermission):
                 or user.has_perm("accounts.view_auditlog")
             )
         )
+
+
+class IsSecurityExecutive(BasePermission):
+    """
+    Allows only Django superusers and users with configured
+    executive roles such as CEO or CTO.
+    """
+
+    message = "You do not have permission to access this resource."
+
+    def has_permission(self, request, view):
+        return can_manage_staff_security(request.user)

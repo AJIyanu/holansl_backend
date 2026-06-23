@@ -14,7 +14,6 @@ from pathlib import Path
 import os
 from dotenv import load_dotenv
 import dj_database_url
-import sys
 
 load_dotenv()
 
@@ -31,69 +30,71 @@ SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "test-secret-key")
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv("DEBUG", False)
 
-ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', 'holansl-backend.onrender.com').split(',')
+ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "holansl-backend.onrender.com").split(
+    ","
+)
 
 
 # Application definition
 
 INSTALLED_APPS = [
-    'django.contrib.admin',
-    'django.contrib.auth',
-    'django.contrib.contenttypes',
-    'django.contrib.sessions',
-    'django.contrib.messages',
-    'django.contrib.staticfiles',
-    'rest_framework',
-    'corsheaders',
+    "django.contrib.admin",
+    "django.contrib.auth",
+    "django.contrib.contenttypes",
+    "django.contrib.sessions",
+    "django.contrib.messages",
+    "django.contrib.staticfiles",
+    "rest_framework",
+    "corsheaders",
     "rest_framework.authtoken",
-    'crm',
-    'procurement',
-    'ledger',
-    'django_filters',
-    'accounts',
-    'drf_spectacular',
+    "crm",
+    "procurement",
+    "ledger",
+    "django_filters",
+    "accounts",
+    "drf_spectacular",
 ]
 
 MIDDLEWARE = [
-    'django.middleware.security.SecurityMiddleware',
-    'corsheaders.middleware.CorsMiddleware',
-    'holansladminservices.middleware.auth_header_fallback_middleware',
-    'holansladminservices.middleware.header_debug_middleware',
-    'django.contrib.sessions.middleware.SessionMiddleware',
-    'django.middleware.common.CommonMiddleware',
-    'django.middleware.csrf.CsrfViewMiddleware',
-    'django.contrib.auth.middleware.AuthenticationMiddleware',
-    'django.contrib.messages.middleware.MessageMiddleware',
-    'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    'whitenoise.middleware.WhiteNoiseMiddleware',
+    "django.middleware.security.SecurityMiddleware",
+    "corsheaders.middleware.CorsMiddleware",
+    "holansladminservices.middleware.auth_header_fallback_middleware",
+    "holansladminservices.middleware.header_debug_middleware",
+    "django.contrib.sessions.middleware.SessionMiddleware",
+    "django.middleware.common.CommonMiddleware",
+    "django.middleware.csrf.CsrfViewMiddleware",
+    "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "django.contrib.messages.middleware.MessageMiddleware",
+    "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",
 ]
 
-ROOT_URLCONF = 'holansladminservices.urls'
+ROOT_URLCONF = "holansladminservices.urls"
 
 TEMPLATES = [
     {
-        'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
-        'APP_DIRS': True,
-        'OPTIONS': {
-            'context_processors': [
-                'django.template.context_processors.request',
-                'django.contrib.auth.context_processors.auth',
-                'django.contrib.messages.context_processors.messages',
+        "BACKEND": "django.template.backends.django.DjangoTemplates",
+        "DIRS": [],
+        "APP_DIRS": True,
+        "OPTIONS": {
+            "context_processors": [
+                "django.template.context_processors.request",
+                "django.contrib.auth.context_processors.auth",
+                "django.contrib.messages.context_processors.messages",
             ],
         },
     },
 ]
 
-WSGI_APPLICATION = 'holansladminservices.wsgi.application'
+WSGI_APPLICATION = "holansladminservices.wsgi.application"
 
 
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
 DATABASES = {
-    'default': dj_database_url.config(
-        default='sqlite:///db.sqlite3', # Fallback for local development
+    "default": dj_database_url.config(
+        default="sqlite:///db.sqlite3",  # Fallback for local development
         conn_max_age=600,
     )
 }
@@ -104,16 +105,16 @@ DATABASES = {
 
 AUTH_PASSWORD_VALIDATORS = [
     {
-        'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',
+        "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator",
     },
     {
-        'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',
+        "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
     },
     {
-        'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator',
+        "NAME": "django.contrib.auth.password_validation.CommonPasswordValidator",
     },
     {
-        'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',
+        "NAME": "django.contrib.auth.password_validation.NumericPasswordValidator",
     },
 ]
 
@@ -121,9 +122,9 @@ AUTH_PASSWORD_VALIDATORS = [
 # Internationalization
 # https://docs.djangoproject.com/en/5.2/topics/i18n/
 
-LANGUAGE_CODE = 'en-us'
+LANGUAGE_CODE = "en-us"
 
-TIME_ZONE = 'UTC'
+TIME_ZONE = "UTC"
 
 USE_I18N = True
 
@@ -133,16 +134,16 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
-STATIC_URL = 'static/'
+STATIC_URL = "static/"
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
-DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 AUTHENTICATION_BACKENDS = [
-    'accounts.backends.EmailOrUsernameBackend',
-    'django.contrib.auth.backends.ModelBackend',
+    "accounts.backends.EmailOrUsernameBackend",
+    "django.contrib.auth.backends.ModelBackend",
 ]
 
 REST_FRAMEWORK = {
@@ -159,24 +160,22 @@ REST_FRAMEWORK = {
         "rest_framework.filters.SearchFilter",
         "rest_framework.filters.OrderingFilter",
     ],
-    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
-    "DEFAULT_PAGINATION_CLASS": (
-         "holansladminservices.pagination.StandardPagination"
-    ),
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+    "DEFAULT_PAGINATION_CLASS": ("holansladminservices.pagination.StandardPagination"),
     "PAGE_SIZE": 20,
 }
 
 SIMPLE_JWT = {
-    'SIGNING_KEY': os.getenv("JWT_SIGNING_KEY", SECRET_KEY),
+    "SIGNING_KEY": os.getenv("JWT_SIGNING_KEY", SECRET_KEY),
 }
 
 AUTH_USER_MODEL = "accounts.User"
 
 SPECTACULAR_SETTINGS = {
-    'TITLE': 'HolanSL Admin Dashboard API',
-    'DESCRIPTION': 'Holan Integrated Services Ltd Administrative',
-    'VERSION': '1.0.0',
-    'SERVE_INCLUDE_SCHEMA': False,
+    "TITLE": "HolanSL Admin Dashboard API",
+    "DESCRIPTION": "Holan Integrated Services Ltd Administrative",
+    "VERSION": "1.0.0",
+    "SERVE_INCLUDE_SCHEMA": False,
 }
 
 STAFF_MANAGEMENT_ROLES = {
@@ -188,10 +187,10 @@ STAFF_MANAGEMENT_ROLES = {
     if role.strip()
 }
 
-STATIC_URL = '/static/'
-STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
+STATIC_URL = "/static/"
+STATIC_ROOT = os.path.join(BASE_DIR, "staticfiles")
 
-STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
 # --------------------------------------------------------
 # CORS & CSRF CONFIGURATION (ENV-BASED)
@@ -233,12 +232,13 @@ if not DEBUG:
     REFERRER_POLICY = "same-origin"
 
 
-
 # --------------------------------------------------------
 # ENVIRONMENT-BASED CONFIGURATION
 # --------------------------------------------------------
 
-DEFAULT_STAFF_PASSWORD = os.getenv("DEFAULT_STAFF_PASSWORD", "SecureDefaultPassword123!")
+DEFAULT_STAFF_PASSWORD = os.getenv(
+    "DEFAULT_STAFF_PASSWORD", "SecureDefaultPassword123!"
+)
 PASSWORD_RESET_EXPIRY_MINUTES = int(os.getenv("PASSWORD_RESET_EXPIRY_MINUTES", "15"))
 FRONTEND_URL = os.getenv("FRONTEND_URL", "https://admin.holansl.com")
 
@@ -264,4 +264,20 @@ RESEND_FROM_NAME = os.getenv(
 RESEND_FROM_EMAIL = os.getenv(
     "RESEND_FROM_EMAIL",
     "",
+)
+
+# --------------------------------------------------------
+# GEMINI AI CONFIGURATION
+# --------------------------------------------------------
+
+GOOGLE_AI_API_KEY = os.getenv("GOOGLE_AI_API_KEY", "")
+GOOGLE_AI_MODEL = os.getenv(
+    "GOOGLE_AI_MODEL",
+    "gemini-3.1-flash-lite",
+)
+
+AUDIT_UNUSUAL_HOUR_START = int(os.getenv("AUDIT_UNUSUAL_HOUR_START", "0"))
+AUDIT_UNUSUAL_HOUR_END = int(os.getenv("AUDIT_UNUSUAL_HOUR_END", "6"))
+AUDIT_REPEATED_FAILURE_THRESHOLD = int(
+    os.getenv("AUDIT_REPEATED_FAILURE_THRESHOLD", "3")
 )

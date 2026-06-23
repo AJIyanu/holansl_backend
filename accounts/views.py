@@ -1,50 +1,50 @@
-from rest_framework import viewsets
-from rest_framework.permissions import IsAdminUser, AllowAny
-from rest_framework_simplejwt.views import TokenObtainPairView
 from django.contrib.auth.models import Permission
-from .models import User, StaffProfile, Department, Role
-from rest_framework.permissions import DjangoModelPermissions
-from .serializers import (
-    UserSerializer, DepartmentSerializer, RoleSerializer, UserWriteSerializer,
-    PermissionSerializer, CurrentUserSerializer, HolanTokenObtainPairSerializer,
-    PasswordResetVerifySerializer, PasswordResetConfirmSerializer, ForgotPasswordSerializer,
-    AuditLogSerializer, StaffProfileReadSerializer, StaffProfileWriteSerializer, UserSummarySerializer,
-)
+from django.http import HttpResponse, JsonResponse
+from rest_framework import status, viewsets
+from rest_framework.decorators import action, api_view, permission_classes
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.generics import RetrieveAPIView
-from rest_framework.permissions import IsAuthenticated
-
-from rest_framework.decorators import api_view, permission_classes
-from django.http import JsonResponse
-from django.http import HttpResponse
-
-from rest_framework import status
+from rest_framework.permissions import (
+    AllowAny,
+    DjangoModelPermissions,
+    IsAdminUser,
+    IsAuthenticated,
+)
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework_simplejwt.views import TokenObtainPairView
 
-from rest_framework.exceptions import PermissionDenied
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.request import clone_request
-
-from .models import AuditLog
+from .audit_services import (
+    calculate_audit_summary,
+    calculate_login_summary,
+    generate_ai_security_insight,
+    generate_audit_ai_insight,
+)
+from .models import AuditLog, Department, Role, StaffProfile, User
 from .permissions import (
     CanViewAuditLogs,
+    IsSecurityExecutive,
     can_manage_staff_security,
 )
 from .serializers import (
     AuditLogSerializer,
+    CurrentUserSerializer,
+    DepartmentSerializer,
+    ForgotPasswordSerializer,
+    HolanTokenObtainPairSerializer,
+    PasswordResetConfirmSerializer,
+    PasswordResetVerifySerializer,
+    PermissionSerializer,
+    RoleSerializer,
     StaffProfileReadSerializer,
     StaffProfileWriteSerializer,
     UserSummarySerializer,
     UserWriteSerializer,
 )
 
+
 class UserViewSet(viewsets.ModelViewSet):
-    queryset = (
-        User.objects
-        .prefetch_related("groups")
-        .all()
-        .order_by("-date_joined")
-    )
+    queryset = User.objects.prefetch_related("groups").all().order_by("-date_joined")
 
     permission_classes = [
         IsAdminUser,
@@ -99,9 +99,8 @@ class UserViewSet(viewsets.ModelViewSet):
 
         requested_fields = set(request.data.keys())
 
-        if (
-            requested_fields & privileged_fields
-            and not can_manage_staff_security(request.user)
+        if requested_fields & privileged_fields and not can_manage_staff_security(
+            request.user
         ):
             raise PermissionDenied(
                 "You do not have permission to perform this operation."
@@ -117,8 +116,10 @@ class UserViewSet(viewsets.ModelViewSet):
 
         return super().destroy(request, *args, **kwargs)
 
+
 class HolanTokenObtainPairView(TokenObtainPairView):
     serializer_class = HolanTokenObtainPairSerializer
+
 
 class PasswordResetVerifyView(APIView):
     permission_classes = [AllowAny]
@@ -167,6 +168,7 @@ class PasswordResetConfirmView(APIView):
             status=status.HTTP_200_OK,
         )
 
+
 class ForgotPasswordView(APIView):
     permission_classes = [AllowAny]
     authentication_classes = []
@@ -190,10 +192,10 @@ class ForgotPasswordView(APIView):
             status=status.HTTP_200_OK,
         )
 
+
 class StaffProfileViewSet(viewsets.ModelViewSet):
     queryset = (
-        StaffProfile.objects
-        .select_related("user", "department")
+        StaffProfile.objects.select_related("user", "department")
         .prefetch_related("user__groups")
         .all()
     )
@@ -256,9 +258,8 @@ class StaffProfileViewSet(viewsets.ModelViewSet):
 
         requested_fields = set(request.data.keys())
 
-        if (
-            requested_fields & privileged_fields
-            and not can_manage_staff_security(request.user)
+        if requested_fields & privileged_fields and not can_manage_staff_security(
+            request.user
         ):
             raise PermissionDenied(
                 "You do not have permission to perform this operation."
@@ -274,55 +275,64 @@ class StaffProfileViewSet(viewsets.ModelViewSet):
 
         return super().destroy(request, *args, **kwargs)
 
+
 class DepartmentViewSet(viewsets.ModelViewSet):
     """API endpoint for departments."""
+
     queryset = Department.objects.all()
     serializer_class = DepartmentSerializer
     permission_classes = [IsAdminUser, DjangoModelPermissions]
 
     # --- Filtering, Search, and Ordering ---
-    search_fields = ['name', 'code']
-    ordering_fields = ['name']
+    search_fields = ["name", "code"]
+    ordering_fields = ["name"]
+
 
 class RoleViewSet(viewsets.ModelViewSet):
     """API endpoint for roles (groups)."""
+
     queryset = Role.objects.all()
     serializer_class = RoleSerializer
     permission_classes = [IsAdminUser]
 
     # --- Filtering, Search, and Ordering ---
-    search_fields = ['name']
-    ordering_fields = ['name']
+    search_fields = ["name"]
+    ordering_fields = ["name"]
+
 
 class PermissionViewSet(viewsets.ReadOnlyModelViewSet):
     """
     API endpoint to view available permissions in the system.
     This is a read-only endpoint.
     """
+
     queryset = Permission.objects.all()
     serializer_class = PermissionSerializer
     permission_classes = [IsAdminUser]
     pagination_class = None
+
 
 class CurrentUserView(RetrieveAPIView):
     """
     API endpoint to retrieve the currently authenticated user's data,
     including their linked staff profile.
     """
+
     serializer_class = CurrentUserSerializer
     permission_classes = [IsAuthenticated]
 
     def get_object(self):
         return self.request.user
 
+
 class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = (
-        AuditLog.objects
-        .select_related("user", "target_user")
-        .all()
-    )
+    queryset = AuditLog.objects.select_related("user", "target_user").all()
+
     serializer_class = AuditLogSerializer
-    permission_classes = [IsAuthenticated, CanViewAuditLogs]
+    permission_classes = [
+        IsAuthenticated,
+        CanViewAuditLogs,
+    ]
 
     filterset_fields = [
         "user",
@@ -344,12 +354,79 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
         "object_id",
     ]
 
-    ordering_fields = ["created_at", "event_type", "status"]
+    ordering_fields = [
+        "created_at",
+        "event_type",
+        "status",
+    ]
+
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path="summary",
+        permission_classes=[IsAuthenticated, IsSecurityExecutive],
+    )
+    def summary(self, request):
+        try:
+            summary = calculate_audit_summary(
+                request.query_params.get("range", "month")
+            )
+        except ValueError as exc:
+            return Response(
+                {
+                    "detail": str(exc),
+                    "code": "invalid_summary_range",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return Response(summary, status=status.HTTP_200_OK)
+
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path="ai-insight",
+        permission_classes=[IsAuthenticated, IsSecurityExecutive],
+    )
+    def ai_insight(self, request):
+        range_name = request.query_params.get("range", "month")
+
+        try:
+            result = generate_audit_ai_insight(range_name)
+        except ValueError as exc:
+            return Response(
+                {
+                    "detail": str(exc),
+                    "code": "invalid_summary_range",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except RuntimeError:
+            return Response(
+                {
+                    "detail": "AI audit insight is temporarily unavailable.",
+                    "code": "ai_insight_unavailable",
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        except Exception:
+            return Response(
+                {
+                    "detail": "AI audit insight could not be generated.",
+                    "code": "ai_insight_failed",
+                },
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        return Response(result, status=status.HTTP_200_OK)
 
 
 class LoginActivityViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = AuditLogSerializer
-    permission_classes = [IsAuthenticated, CanViewAuditLogs]
+    permission_classes = [
+        IsAuthenticated,
+        CanViewAuditLogs,
+    ]
 
     filterset_fields = [
         "user",
@@ -364,29 +441,91 @@ class LoginActivityViewSet(viewsets.ReadOnlyModelViewSet):
         "ip_address",
     ]
 
-    ordering_fields = ["created_at", "event_type", "status"]
+    ordering_fields = [
+        "created_at",
+        "event_type",
+        "status",
+    ]
 
     def get_queryset(self):
-        return (
-            AuditLog.objects
-            .select_related("user", "target_user")
-            .filter(
-                event_type__in=[
-                    AuditLog.EventType.LOGIN_SUCCESS,
-                    AuditLog.EventType.LOGIN_FAILED,
-                    AuditLog.EventType.LOGOUT,
-                    AuditLog.EventType.DEFAULT_PASSWORD_LOGIN_BLOCKED,
-                ]
-            )
+        return AuditLog.objects.select_related("user", "target_user").filter(
+            event_type__in=[
+                AuditLog.EventType.LOGIN_SUCCESS,
+                AuditLog.EventType.LOGIN_FAILED,
+                AuditLog.EventType.LOGOUT,
+                AuditLog.EventType.DEFAULT_PASSWORD_LOGIN_BLOCKED,
+                AuditLog.EventType.PASSWORD_RESET_LINK_SENT,
+                AuditLog.EventType.PASSWORD_RESET_COMPLETED,
+                AuditLog.EventType.PASSWORD_RESET_FAILED,
+            ]
         )
 
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path="summary",
+        permission_classes=[IsAuthenticated, IsSecurityExecutive],
+    )
+    def summary(self, request):
+        try:
+            summary = calculate_login_summary(
+                request.query_params.get("range", "month")
+            )
+        except ValueError as exc:
+            return Response(
+                {
+                    "detail": str(exc),
+                    "code": "invalid_summary_range",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-@api_view(['GET', 'HEAD'])
+        return Response(summary, status=status.HTTP_200_OK)
+
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path="ai-insight",
+        permission_classes=[IsAuthenticated, IsSecurityExecutive],
+    )
+    def ai_insight(self, request):
+        range_name = request.query_params.get("range", "month")
+
+        try:
+            result = generate_ai_security_insight(range_name)
+        except ValueError as exc:
+            return Response(
+                {
+                    "detail": str(exc),
+                    "code": "invalid_summary_range",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except RuntimeError:
+            return Response(
+                {
+                    "detail": ("AI security insight is temporarily unavailable."),
+                    "code": "ai_insight_unavailable",
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        except Exception:
+            # Log the real exception server-side, but do not expose
+            # provider/API details to the client.
+            return Response(
+                {
+                    "detail": ("AI security insight could not be generated."),
+                    "code": "ai_insight_failed",
+                },
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        return Response(result, status=status.HTTP_200_OK)
+
+
+@api_view(["GET", "HEAD"])
 @permission_classes([AllowAny])
 def health_check(request):
     if request.method == "HEAD":
         return HttpResponse("OK", status=200)
-    return JsonResponse({
-        'status': 'ok',
-        'message': 'Server is running'
-    })
+    return JsonResponse({"status": "ok", "message": "Server is running"})
