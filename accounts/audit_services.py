@@ -3,15 +3,14 @@ from datetime import timedelta
 from typing import Literal
 
 from django.conf import settings
+from django.core.cache import cache
 from django.db.models import Count, Q
-from django.db.models.functions import Coalesce
 from django.utils import timezone
 from google import genai
 from google.genai import types
 from pydantic import BaseModel, Field
 
 from .models import AuditLog
-
 
 ALLOWED_RANGES = {
     "week": {
@@ -41,6 +40,197 @@ LOGIN_EVENT_TYPES = [
     AuditLog.EventType.PASSWORD_RESET_COMPLETED,
     AuditLog.EventType.PASSWORD_RESET_FAILED,
 ]
+
+
+CACHE_VERSION = "v1"
+
+
+def get_summary_cache_key(
+    *,
+    category: str,
+    summary_type: str,
+    range_name: str,
+):
+    return f"audit-summary:{CACHE_VERSION}:{category}:{summary_type}:{range_name}"
+
+
+def get_cache_threshold(range_name: str) -> int:
+    return settings.SUMMARY_CACHE_THRESHOLDS.get(
+        range_name,
+        settings.SUMMARY_CACHE_THRESHOLDS["month"],
+    )
+
+
+def get_category_queryset(category, date_from, date_to):
+    queryset = AuditLog.objects.filter(
+        created_at__gte=date_from,
+        created_at__lte=date_to,
+    )
+
+    if category == "login":
+        queryset = queryset.filter(event_type__in=LOGIN_EVENT_TYPES)
+
+    return queryset
+
+
+def should_regenerate_cached_result(
+    *,
+    cached_entry,
+    category,
+    range_name,
+    max_age,
+):
+    if not cached_entry:
+        return True
+
+    cached_at_raw = cached_entry.get("cached_at")
+    last_record_at_raw = cached_entry.get("last_record_at")
+
+    if not cached_at_raw:
+        return True
+
+    cached_at = timezone.datetime.fromisoformat(cached_at_raw)
+
+    if timezone.is_naive(cached_at):
+        cached_at = timezone.make_aware(cached_at)
+
+    cache_age = (timezone.now() - cached_at).total_seconds()
+
+    if cache_age >= max_age:
+        return True
+
+    period = get_summary_period(range_name)
+
+    queryset = get_category_queryset(
+        category,
+        period["date_from"],
+        period["date_to"],
+    )
+
+    if last_record_at_raw:
+        last_record_at = timezone.datetime.fromisoformat(last_record_at_raw)
+
+        if timezone.is_naive(last_record_at):
+            last_record_at = timezone.make_aware(last_record_at)
+
+        new_record_count = queryset.filter(created_at__gt=last_record_at).count()
+    else:
+        new_record_count = queryset.count()
+
+    threshold = get_cache_threshold(range_name)
+
+    return new_record_count >= threshold
+
+
+def get_or_generate_cached_result(
+    *,
+    category,
+    summary_type,
+    range_name,
+    generator,
+    max_age,
+):
+    cache_key = get_summary_cache_key(
+        category=category,
+        summary_type=summary_type,
+        range_name=range_name,
+    )
+
+    cached_entry = cache.get(cache_key)
+
+    regenerate = should_regenerate_cached_result(
+        cached_entry=cached_entry,
+        category=category,
+        range_name=range_name,
+        max_age=max_age,
+    )
+
+    if not regenerate:
+        return {
+            **cached_entry["result"],
+            "cache": {
+                "hit": True,
+                "cached_at": cached_entry["cached_at"],
+                "new_records_threshold": get_cache_threshold(range_name),
+            },
+        }
+
+    result = generator(range_name)
+
+    period = get_summary_period(range_name)
+
+    queryset = get_category_queryset(
+        category,
+        period["date_from"],
+        period["date_to"],
+    )
+
+    latest_record = queryset.order_by("-created_at").first()
+
+    cached_at = timezone.now()
+
+    entry = {
+        "result": result,
+        "cached_at": cached_at.isoformat(),
+        "last_record_at": (
+            latest_record.created_at.isoformat() if latest_record else None
+        ),
+    }
+
+    cache.set(
+        cache_key,
+        entry,
+        timeout=max_age * 2,
+    )
+
+    return {
+        **result,
+        "cache": {
+            "hit": False,
+            "cached_at": entry["cached_at"],
+            "new_records_threshold": get_cache_threshold(range_name),
+        },
+    }
+
+
+def get_cached_login_summary(range_name):
+    return get_or_generate_cached_result(
+        category="login",
+        summary_type="rules",
+        range_name=range_name,
+        generator=calculate_login_summary,
+        max_age=settings.SUMMARY_CACHE_MAX_AGE,
+    )
+
+
+def get_cached_audit_summary(range_name):
+    return get_or_generate_cached_result(
+        category="audit",
+        summary_type="rules",
+        range_name=range_name,
+        generator=calculate_audit_summary,
+        max_age=settings.SUMMARY_CACHE_MAX_AGE,
+    )
+
+
+def get_cached_login_ai_insight(range_name):
+    return get_or_generate_cached_result(
+        category="login",
+        summary_type="ai",
+        range_name=range_name,
+        generator=generate_ai_security_insight,
+        max_age=settings.AI_CACHE_MAX_AGE,
+    )
+
+
+def get_cached_audit_ai_insight(range_name):
+    return get_or_generate_cached_result(
+        category="audit",
+        summary_type="ai",
+        range_name=range_name,
+        generator=generate_audit_ai_insight,
+        max_age=settings.AI_CACHE_MAX_AGE,
+    )
 
 
 def get_summary_period(range_name: str):

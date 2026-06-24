@@ -41,6 +41,12 @@ from .serializers import (
     UserSummarySerializer,
     UserWriteSerializer,
 )
+from .audit_services import (
+    get_cached_audit_ai_insight,
+    get_cached_audit_summary,
+    get_cached_login_ai_insight,
+    get_cached_login_summary,
+)
 
 
 class UserViewSet(viewsets.ModelViewSet):
@@ -368,7 +374,7 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
     )
     def summary(self, request):
         try:
-            summary = calculate_audit_summary(
+            summary = get_cached_audit_summary(
                 request.query_params.get("range", "month")
             )
         except ValueError as exc:
@@ -392,7 +398,7 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
         range_name = request.query_params.get("range", "month")
 
         try:
-            result = generate_audit_ai_insight(range_name)
+            result = get_cached_audit_ai_insight(range_name)
         except ValueError as exc:
             return Response(
                 {
@@ -468,7 +474,7 @@ class LoginActivityViewSet(viewsets.ReadOnlyModelViewSet):
     )
     def summary(self, request):
         try:
-            summary = calculate_login_summary(
+            summary = get_cached_login_summary(
                 request.query_params.get("range", "month")
             )
         except ValueError as exc:
@@ -492,7 +498,7 @@ class LoginActivityViewSet(viewsets.ReadOnlyModelViewSet):
         range_name = request.query_params.get("range", "month")
 
         try:
-            result = generate_ai_security_insight(range_name)
+            result = get_cached_login_ai_insight(range_name)
         except ValueError as exc:
             return Response(
                 {

@@ -281,3 +281,41 @@ AUDIT_UNUSUAL_HOUR_END = int(os.getenv("AUDIT_UNUSUAL_HOUR_END", "6"))
 AUDIT_REPEATED_FAILURE_THRESHOLD = int(
     os.getenv("AUDIT_REPEATED_FAILURE_THRESHOLD", "3")
 )
+
+
+REDIS_URL = os.getenv("REDIS_URL")
+
+if REDIS_URL:
+    CACHES = {
+        "default": {
+            "BACKEND": "django_redis.cache.RedisCache",
+            "LOCATION": REDIS_URL,
+            "OPTIONS": {
+                "CLIENT_CLASS": "django_redis.client.DefaultClient",
+                "IGNORE_EXCEPTIONS": True,
+            },
+            "KEY_PREFIX": "holansl",
+            "TIMEOUT": 1800,
+        }
+    }
+else:
+    # Persistent fallback using Supabase/PostgreSQL.
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.db.DatabaseCache",
+            "LOCATION": "django_cache",
+            "TIMEOUT": 1800,
+        }
+    }
+
+
+SUMMARY_CACHE_THRESHOLDS = {
+    "week": int(os.getenv("SUMMARY_CACHE_WEEK_THRESHOLD", "10")),
+    "month": int(os.getenv("SUMMARY_CACHE_MONTH_THRESHOLD", "20")),
+    "quarter": int(os.getenv("SUMMARY_CACHE_QUARTER_THRESHOLD", "50")),
+    "year": int(os.getenv("SUMMARY_CACHE_YEAR_THRESHOLD", "100")),
+}
+
+SUMMARY_CACHE_MAX_AGE = int(os.getenv("SUMMARY_CACHE_MAX_AGE", "1800"))
+
+AI_CACHE_MAX_AGE = int(os.getenv("AI_CACHE_MAX_AGE", "21600"))

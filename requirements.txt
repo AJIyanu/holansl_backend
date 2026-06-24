@@ -19,6 +19,7 @@ dj-database-url==3.0.1
 Django==5.2.6
 django-cors-headers==4.7.0
 django-filter==25.1
+django-redis==7.0.0
 djangorestframework==3.16.0
 djangorestframework_simplejwt==5.5.1
 drf-spectacular==0.28.0
@@ -52,6 +53,7 @@ python-decouple==3.8
 python-dotenv==1.1.1
 pytz==2025.2
 PyYAML==6.0.2
+redis==8.0.1
 referencing==0.36.2
 requests==2.32.5
 resend==2.32.2
