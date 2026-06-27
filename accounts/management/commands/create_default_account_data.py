@@ -94,14 +94,10 @@ class Command(BaseCommand):
 
             if created:
                 self.stdout.write(
-                    self.style.SUCCESS(
-                        f"Created department: {department.name}"
-                    )
+                    self.style.SUCCESS(f"Created department: {department.name}")
                 )
             else:
-                self.stdout.write(
-                    f"Department already exists: {department.name}"
-                )
+                self.stdout.write(f"Department already exists: {department.name}")
 
         for role_name, rule in ROLE_PERMISSION_RULES.items():
             role, created = Role.objects.get_or_create(name=role_name)
@@ -110,14 +106,17 @@ class Command(BaseCommand):
                 content_type__app_label__in=rule["apps"],
             )
 
-            allowed_prefixes = tuple(
-                f"{action}_" for action in rule["actions"]
-            )
+            allowed_prefixes = tuple(f"{action}_" for action in rule["actions"])
+
+            extra_codenames = set(rule.get("extra_codenames", []))
 
             permissions = [
                 permission
                 for permission in permissions
-                if permission.codename.startswith(allowed_prefixes)
+                if (
+                    permission.codename.startswith(allowed_prefixes)
+                    or permission.codename in extra_codenames
+                )
             ]
 
             role.permissions.set(permissions)
@@ -125,13 +124,10 @@ class Command(BaseCommand):
             status = "Created" if created else "Updated"
             self.stdout.write(
                 self.style.SUCCESS(
-                    f"{status} role: {role_name} "
-                    f"({len(permissions)} permissions)"
+                    f"{status} role: {role_name} ({len(permissions)} permissions)"
                 )
             )
 
         self.stdout.write(
-            self.style.SUCCESS(
-                "Default account data configured successfully."
-            )
+            self.style.SUCCESS("Default account data configured successfully.")
         )

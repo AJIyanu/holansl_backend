@@ -52,6 +52,7 @@ INSTALLED_APPS = [
     "ledger",
     "django_filters",
     "accounts",
+    "notifications.apps.NotificationsConfig",
     "drf_spectacular",
 ]
 
@@ -319,3 +320,97 @@ SUMMARY_CACHE_THRESHOLDS = {
 SUMMARY_CACHE_MAX_AGE = int(os.getenv("SUMMARY_CACHE_MAX_AGE", "1800"))
 
 AI_CACHE_MAX_AGE = int(os.getenv("AI_CACHE_MAX_AGE", "21600"))
+
+
+# --------------------------------------------------------
+# NOTIFICATION CONFIGURATION
+# --------------------------------------------------------
+
+# inline:
+#   Attempt new deliveries from the web process after commit.
+#   Suitable for the current free/testing deployment.
+#
+# outbox:
+#   Queue all deliveries for a cron job or background worker.
+#
+# hybrid:
+#   Attempt immediately, while cron/worker handles retries.
+#   Recommended when scheduled processing is available.
+NOTIFICATION_PROCESSING_MODE = (
+    os.getenv(
+        "NOTIFICATION_PROCESSING_MODE",
+        "inline",
+    )
+    .strip()
+    .lower()
+)
+
+NOTIFICATION_DEFAULT_LANGUAGE = os.getenv(
+    "NOTIFICATION_DEFAULT_LANGUAGE",
+    "en",
+)
+
+NOTIFICATION_EMAIL_ENABLED = os.getenv(
+    "NOTIFICATION_EMAIL_ENABLED",
+    "True",
+).strip().lower() in {"1", "true", "yes", "on"}
+
+NOTIFICATION_WHATSAPP_ENABLED = os.getenv(
+    "NOTIFICATION_WHATSAPP_ENABLED",
+    "False",
+).strip().lower() in {"1", "true", "yes", "on"}
+
+# Keep disabled until a WhatsApp provider adapter is selected.
+NOTIFICATION_WHATSAPP_PROVIDER = (
+    os.getenv(
+        "NOTIFICATION_WHATSAPP_PROVIDER",
+        "disabled",
+    )
+    .strip()
+    .lower()
+)
+
+NOTIFICATION_DEFAULT_MAX_ATTEMPTS = int(
+    os.getenv("NOTIFICATION_DEFAULT_MAX_ATTEMPTS", "3")
+)
+
+NOTIFICATION_RETRY_BASE_SECONDS = int(
+    os.getenv("NOTIFICATION_RETRY_BASE_SECONDS", "60")
+)
+
+NOTIFICATION_RETRY_MAX_SECONDS = int(
+    os.getenv("NOTIFICATION_RETRY_MAX_SECONDS", "3600")
+)
+
+NOTIFICATION_LOCK_TIMEOUT_SECONDS = int(
+    os.getenv("NOTIFICATION_LOCK_TIMEOUT_SECONDS", "900")
+)
+
+NOTIFICATION_PROCESSING_BATCH_SIZE = int(
+    os.getenv("NOTIFICATION_PROCESSING_BATCH_SIZE", "100")
+)
+
+# In inline/hybrid mode, also process a small number of older due rows
+# whenever a new notification is dispatched.
+NOTIFICATION_OPPORTUNISTIC_BATCH_SIZE = int(
+    os.getenv("NOTIFICATION_OPPORTUNISTIC_BATCH_SIZE", "10")
+)
+
+NOTIFICATION_RETENTION_DAYS = int(os.getenv("NOTIFICATION_RETENTION_DAYS", "365"))
+
+# Used by an external scheduler calling the protected processing endpoint.
+NOTIFICATION_CRON_SECRET = os.getenv(
+    "NOTIFICATION_CRON_SECRET",
+    "",
+)
+
+# Internal processing endpoint will not appear in the generated OpenAPI schema.
+NOTIFICATION_HIDE_INTERNAL_SCHEMA = os.getenv(
+    "NOTIFICATION_HIDE_INTERNAL_SCHEMA",
+    "True",
+).strip().lower() in {"1", "true", "yes", "on"}
+
+NOTIFICATION_WORKER_NAME = os.getenv(
+    "NOTIFICATION_WORKER_NAME",
+    "",
+)

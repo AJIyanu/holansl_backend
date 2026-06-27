@@ -1,0 +1,6687 @@
+openapi: 3.0.3
+info:
+  title: HolanSL Admin Dashboard API
+  version: 1.0.0
+  description: Holan Integrated Services Ltd Administrative
+paths:
+  /account/audit-logs/:
+    get:
+      operationId: account_audit_logs_list
+      parameters:
+      - in: query
+        name: action
+        schema:
+          type: string
+      - in: query
+        name: app_label
+        schema:
+          type: string
+      - in: query
+        name: event_category
+        schema:
+          type: string
+          enum:
+          - AUTH
+          - CRUD
+          - SECURITY
+          - SYSTEM
+        description: |-
+          * `AUTH` - Authentication
+          * `CRUD` - CRUD Activity
+          * `SYSTEM` - System
+          * `SECURITY` - Security
+      - in: query
+        name: event_type
+        schema:
+          type: string
+          enum:
+          - ACCOUNT_CREATED
+          - CREATE
+          - DEFAULT_PASSWORD_LOGIN_BLOCKED
+          - DELETE
+          - LOGIN_FAILED
+          - LOGIN_SUCCESS
+          - LOGOUT
+          - PASSWORD_RESET_CODE_VERIFIED
+          - PASSWORD_RESET_COMPLETED
+          - PASSWORD_RESET_EMAIL_FAILED
+          - PASSWORD_RESET_FAILED
+          - PASSWORD_RESET_LINK_SENT
+          - PASSWORD_RESET_REQUESTED
+          - READ
+          - UPDATE
+        description: |-
+          * `LOGIN_SUCCESS` - Login Success
+          * `LOGIN_FAILED` - Login Failed
+          * `LOGOUT` - Logout
+          * `ACCOUNT_CREATED` - Account Created
+          * `DEFAULT_PASSWORD_LOGIN_BLOCKED` - Default Password Login Blocked
+          * `PASSWORD_RESET_LINK_SENT` - Password Reset Link Sent
+          * `PASSWORD_RESET_CODE_VERIFIED` - Password Reset Code Verified
+          * `PASSWORD_RESET_COMPLETED` - Password Reset Completed
+          * `PASSWORD_RESET_FAILED` - Password Reset Failed
+          * `PASSWORD_RESET_REQUESTED` - Password Reset Requested
+          * `PASSWORD_RESET_EMAIL_FAILED` - Password Reset Email Failed
+          * `CREATE` - Create
+          * `READ` - Read
+          * `UPDATE` - Update
+          * `DELETE` - Delete
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - in: query
+        name: resource
+        schema:
+          type: string
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      - in: query
+        name: status
+        schema:
+          type: string
+          enum:
+          - FAILED
+          - SUCCESS
+        description: |-
+          * `SUCCESS` - Success
+          * `FAILED` - Failed
+      - in: query
+        name: target_user
+        schema:
+          type: string
+          format: uuid
+      - in: query
+        name: user
+        schema:
+          type: string
+          format: uuid
+      tags:
+      - account
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedAuditLogList'
+          description: ''
+  /account/audit-logs/{id}/:
+    get:
+      operationId: account_audit_logs_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this audit log.
+        required: true
+      tags:
+      - account
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditLog'
+          description: ''
+  /account/audit-logs/ai-insight/:
+    get:
+      operationId: account_audit_logs_ai_insight_retrieve
+      tags:
+      - account
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditLog'
+          description: ''
+  /account/audit-logs/summary/:
+    get:
+      operationId: account_audit_logs_summary_retrieve
+      tags:
+      - account
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditLog'
+          description: ''
+  /account/departments/:
+    get:
+      operationId: account_departments_list
+      description: API endpoint for departments.
+      parameters:
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - account
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedDepartmentList'
+          description: ''
+    post:
+      operationId: account_departments_create
+      description: API endpoint for departments.
+      tags:
+      - account
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Department'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Department'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Department'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Department'
+          description: ''
+  /account/departments/{id}/:
+    get:
+      operationId: account_departments_retrieve
+      description: API endpoint for departments.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this Department.
+        required: true
+      tags:
+      - account
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Department'
+          description: ''
+    put:
+      operationId: account_departments_update
+      description: API endpoint for departments.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this Department.
+        required: true
+      tags:
+      - account
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Department'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Department'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Department'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Department'
+          description: ''
+    patch:
+      operationId: account_departments_partial_update
+      description: API endpoint for departments.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this Department.
+        required: true
+      tags:
+      - account
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedDepartment'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedDepartment'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedDepartment'
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Department'
+          description: ''
+    delete:
+      operationId: account_departments_destroy
+      description: API endpoint for departments.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this Department.
+        required: true
+      tags:
+      - account
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /account/health/:
+    get:
+      operationId: account_health_retrieve
+      tags:
+      - account
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /account/login-activity/:
+    get:
+      operationId: account_login_activity_list
+      parameters:
+      - in: query
+        name: event_type
+        schema:
+          type: string
+          enum:
+          - ACCOUNT_CREATED
+          - CREATE
+          - DEFAULT_PASSWORD_LOGIN_BLOCKED
+          - DELETE
+          - LOGIN_FAILED
+          - LOGIN_SUCCESS
+          - LOGOUT
+          - PASSWORD_RESET_CODE_VERIFIED
+          - PASSWORD_RESET_COMPLETED
+          - PASSWORD_RESET_EMAIL_FAILED
+          - PASSWORD_RESET_FAILED
+          - PASSWORD_RESET_LINK_SENT
+          - PASSWORD_RESET_REQUESTED
+          - READ
+          - UPDATE
+        description: |-
+          * `LOGIN_SUCCESS` - Login Success
+          * `LOGIN_FAILED` - Login Failed
+          * `LOGOUT` - Logout
+          * `ACCOUNT_CREATED` - Account Created
+          * `DEFAULT_PASSWORD_LOGIN_BLOCKED` - Default Password Login Blocked
+          * `PASSWORD_RESET_LINK_SENT` - Password Reset Link Sent
+          * `PASSWORD_RESET_CODE_VERIFIED` - Password Reset Code Verified
+          * `PASSWORD_RESET_COMPLETED` - Password Reset Completed
+          * `PASSWORD_RESET_FAILED` - Password Reset Failed
+          * `PASSWORD_RESET_REQUESTED` - Password Reset Requested
+          * `PASSWORD_RESET_EMAIL_FAILED` - Password Reset Email Failed
+          * `CREATE` - Create
+          * `READ` - Read
+          * `UPDATE` - Update
+          * `DELETE` - Delete
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      - in: query
+        name: status
+        schema:
+          type: string
+          enum:
+          - FAILED
+          - SUCCESS
+        description: |-
+          * `SUCCESS` - Success
+          * `FAILED` - Failed
+      - in: query
+        name: user
+        schema:
+          type: string
+          format: uuid
+      tags:
+      - account
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedAuditLogList'
+          description: ''
+  /account/login-activity/{id}/:
+    get:
+      operationId: account_login_activity_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this audit log.
+        required: true
+      tags:
+      - account
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditLog'
+          description: ''
+  /account/login-activity/ai-insight/:
+    get:
+      operationId: account_login_activity_ai_insight_retrieve
+      tags:
+      - account
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditLog'
+          description: ''
+  /account/login-activity/summary/:
+    get:
+      operationId: account_login_activity_summary_retrieve
+      tags:
+      - account
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditLog'
+          description: ''
+  /account/me/:
+    get:
+      operationId: account_me_retrieve
+      description: |-
+        API endpoint to retrieve the currently authenticated user's data,
+        including their linked staff profile.
+      tags:
+      - account
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurrentUser'
+          description: ''
+  /account/password-reset/confirm/:
+    post:
+      operationId: account_password_reset_confirm_create
+      tags:
+      - account
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /account/password-reset/request/:
+    post:
+      operationId: account_password_reset_request_create
+      tags:
+      - account
+      security:
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /account/password-reset/verify/:
+    post:
+      operationId: account_password_reset_verify_create
+      tags:
+      - account
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /account/permissions/:
+    get:
+      operationId: account_permissions_list
+      description: |-
+        API endpoint to view available permissions in the system.
+        This is a read-only endpoint.
+      parameters:
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - account
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Permission'
+          description: ''
+  /account/permissions/{id}/:
+    get:
+      operationId: account_permissions_retrieve
+      description: |-
+        API endpoint to view available permissions in the system.
+        This is a read-only endpoint.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this permission.
+        required: true
+      tags:
+      - account
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Permission'
+          description: ''
+  /account/profiles/:
+    get:
+      operationId: account_profiles_list
+      parameters:
+      - in: query
+        name: department
+        schema:
+          type: string
+          format: uuid
+      - in: query
+        name: employment_type
+        schema:
+          type: string
+          enum:
+          - CT
+          - FT
+          - IN
+          - PT
+        description: |-
+          * `FT` - Full-Time
+          * `PT` - Part-Time
+          * `CT` - Contract
+          * `IN` - Intern
+      - in: query
+        name: job_title
+        schema:
+          type: string
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      - in: query
+        name: user__groups
+        schema:
+          type: array
+          items:
+            type: integer
+        explode: true
+        style: form
+      - in: query
+        name: user__is_active
+        schema:
+          type: boolean
+      - in: query
+        name: user__is_staff
+        schema:
+          type: boolean
+      tags:
+      - account
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedStaffProfileReadList'
+          description: ''
+    post:
+      operationId: account_profiles_create
+      tags:
+      - account
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StaffProfileWrite'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/StaffProfileWrite'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/StaffProfileWrite'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffProfileWrite'
+          description: ''
+  /account/profiles/{id}/:
+    get:
+      operationId: account_profiles_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this Staff Profile.
+        required: true
+      tags:
+      - account
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffProfileRead'
+          description: ''
+    put:
+      operationId: account_profiles_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this Staff Profile.
+        required: true
+      tags:
+      - account
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StaffProfileWrite'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/StaffProfileWrite'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/StaffProfileWrite'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffProfileWrite'
+          description: ''
+    patch:
+      operationId: account_profiles_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this Staff Profile.
+        required: true
+      tags:
+      - account
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedStaffProfileWrite'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedStaffProfileWrite'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedStaffProfileWrite'
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffProfileWrite'
+          description: ''
+    delete:
+      operationId: account_profiles_destroy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this Staff Profile.
+        required: true
+      tags:
+      - account
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /account/roles/:
+    get:
+      operationId: account_roles_list
+      description: API endpoint for roles (groups).
+      parameters:
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - account
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedRoleList'
+          description: ''
+    post:
+      operationId: account_roles_create
+      description: API endpoint for roles (groups).
+      tags:
+      - account
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Role'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Role'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Role'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Role'
+          description: ''
+  /account/roles/{id}/:
+    get:
+      operationId: account_roles_retrieve
+      description: API endpoint for roles (groups).
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this Role.
+        required: true
+      tags:
+      - account
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Role'
+          description: ''
+    put:
+      operationId: account_roles_update
+      description: API endpoint for roles (groups).
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this Role.
+        required: true
+      tags:
+      - account
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Role'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Role'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Role'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Role'
+          description: ''
+    patch:
+      operationId: account_roles_partial_update
+      description: API endpoint for roles (groups).
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this Role.
+        required: true
+      tags:
+      - account
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedRole'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedRole'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedRole'
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Role'
+          description: ''
+    delete:
+      operationId: account_roles_destroy
+      description: API endpoint for roles (groups).
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this Role.
+        required: true
+      tags:
+      - account
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /account/users/:
+    get:
+      operationId: account_users_list
+      parameters:
+      - in: query
+        name: email
+        schema:
+          type: string
+      - in: query
+        name: first_name
+        schema:
+          type: string
+      - in: query
+        name: groups
+        schema:
+          type: array
+          items:
+            type: integer
+        explode: true
+        style: form
+      - in: query
+        name: is_active
+        schema:
+          type: boolean
+      - in: query
+        name: is_staff
+        schema:
+          type: boolean
+      - in: query
+        name: last_name
+        schema:
+          type: string
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - account
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedUserSummaryList'
+          description: ''
+    post:
+      operationId: account_users_create
+      tags:
+      - account
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserWrite'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/UserWrite'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/UserWrite'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserWrite'
+          description: ''
+  /account/users/{id}/:
+    get:
+      operationId: account_users_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this user.
+        required: true
+      tags:
+      - account
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserSummary'
+          description: ''
+    put:
+      operationId: account_users_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this user.
+        required: true
+      tags:
+      - account
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserWrite'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/UserWrite'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/UserWrite'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserWrite'
+          description: ''
+    patch:
+      operationId: account_users_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this user.
+        required: true
+      tags:
+      - account
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedUserWrite'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedUserWrite'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedUserWrite'
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserWrite'
+          description: ''
+    delete:
+      operationId: account_users_destroy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this user.
+        required: true
+      tags:
+      - account
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /crm/contacts/:
+    get:
+      operationId: crm_contacts_list
+      parameters:
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - in: query
+        name: party__party_type
+        schema:
+          type: string
+          enum:
+          - client
+          - logistics
+          - supplier
+        description: |-
+          * `client` - Client
+          * `supplier` - Supplier
+          * `logistics` - Logistics
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - crm
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedContactPersonList'
+          description: ''
+    post:
+      operationId: crm_contacts_create
+      tags:
+      - crm
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ContactPerson'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ContactPerson'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ContactPerson'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContactPerson'
+          description: ''
+  /crm/contacts/{id}/:
+    get:
+      operationId: crm_contacts_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this contact person.
+        required: true
+      tags:
+      - crm
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContactPerson'
+          description: ''
+    put:
+      operationId: crm_contacts_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this contact person.
+        required: true
+      tags:
+      - crm
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ContactPerson'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ContactPerson'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ContactPerson'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContactPerson'
+          description: ''
+    patch:
+      operationId: crm_contacts_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this contact person.
+        required: true
+      tags:
+      - crm
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedContactPerson'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedContactPerson'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedContactPerson'
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContactPerson'
+          description: ''
+    delete:
+      operationId: crm_contacts_destroy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this contact person.
+        required: true
+      tags:
+      - crm
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /crm/parties/:
+    get:
+      operationId: crm_parties_list
+      parameters:
+      - in: query
+        name: is_organization
+        schema:
+          type: boolean
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - in: query
+        name: party_type
+        schema:
+          type: string
+          enum:
+          - client
+          - logistics
+          - supplier
+        description: |-
+          * `client` - Client
+          * `supplier` - Supplier
+          * `logistics` - Logistics
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - crm
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedPartyList'
+          description: ''
+    post:
+      operationId: crm_parties_create
+      tags:
+      - crm
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Party'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Party'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Party'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Party'
+          description: ''
+  /crm/parties/{id}/:
+    get:
+      operationId: crm_parties_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this party.
+        required: true
+      tags:
+      - crm
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Party'
+          description: ''
+    put:
+      operationId: crm_parties_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this party.
+        required: true
+      tags:
+      - crm
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Party'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Party'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Party'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Party'
+          description: ''
+    patch:
+      operationId: crm_parties_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this party.
+        required: true
+      tags:
+      - crm
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedParty'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedParty'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedParty'
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Party'
+          description: ''
+    delete:
+      operationId: crm_parties_destroy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this party.
+        required: true
+      tags:
+      - crm
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /ledger/categories/:
+    get:
+      operationId: ledger_categories_list
+      parameters:
+      - in: query
+        name: flow
+        schema:
+          type: string
+          enum:
+          - CREDIT
+          - DEBIT
+        description: |-
+          * `CREDIT` - Credit (Money In)
+          * `DEBIT` - Debit (Money Out)
+      - in: query
+        name: name
+        schema:
+          type: string
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - ledger
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedCategoryList'
+          description: ''
+    post:
+      operationId: ledger_categories_create
+      tags:
+      - ledger
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Category'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Category'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Category'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Category'
+          description: ''
+  /ledger/categories/{id}/:
+    get:
+      operationId: ledger_categories_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this category.
+        required: true
+      tags:
+      - ledger
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Category'
+          description: ''
+    put:
+      operationId: ledger_categories_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this category.
+        required: true
+      tags:
+      - ledger
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Category'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Category'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Category'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Category'
+          description: ''
+    patch:
+      operationId: ledger_categories_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this category.
+        required: true
+      tags:
+      - ledger
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedCategory'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedCategory'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedCategory'
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Category'
+          description: ''
+    delete:
+      operationId: ledger_categories_destroy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this category.
+        required: true
+      tags:
+      - ledger
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /ledger/expectations/:
+    get:
+      operationId: ledger_expectations_list
+      parameters:
+      - in: query
+        name: category
+        schema:
+          type: string
+          format: uuid
+      - in: query
+        name: currency
+        schema:
+          type: string
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      - in: query
+        name: status
+        schema:
+          type: string
+          enum:
+          - FULFILLED
+          - NOT_FULFILLED
+          - PARTLY_FULFILLED
+        description: |-
+          * `FULFILLED` - Fulfilled
+          * `NOT_FULFILLED` - Not Fulfilled
+          * `PARTLY_FULFILLED` - Partly Fulfilled
+      tags:
+      - ledger
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedExpectationList'
+          description: ''
+    post:
+      operationId: ledger_expectations_create
+      tags:
+      - ledger
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Expectation'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Expectation'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Expectation'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Expectation'
+          description: ''
+  /ledger/expectations/{id}/:
+    get:
+      operationId: ledger_expectations_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this expectation.
+        required: true
+      tags:
+      - ledger
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Expectation'
+          description: ''
+    put:
+      operationId: ledger_expectations_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this expectation.
+        required: true
+      tags:
+      - ledger
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Expectation'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Expectation'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Expectation'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Expectation'
+          description: ''
+    patch:
+      operationId: ledger_expectations_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this expectation.
+        required: true
+      tags:
+      - ledger
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedExpectation'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedExpectation'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedExpectation'
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Expectation'
+          description: ''
+    delete:
+      operationId: ledger_expectations_destroy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this expectation.
+        required: true
+      tags:
+      - ledger
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /ledger/reconciliation/:
+    get:
+      operationId: ledger_reconciliation_retrieve
+      description: |-
+        Returns reconciliation for a party:
+        - Expectations (invoice/loan) from a party
+        - Transactions (payments in/out) with a party
+        - Balance = expectations - transactions (tx logic depends on category)
+        Supports ?party=<uuid>&start=YYYY-MM-DD&end=YYYY-MM-DD
+      tags:
+      - ledger
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /ledger/transactions/:
+    get:
+      operationId: ledger_transactions_list
+      parameters:
+      - in: query
+        name: category
+        schema:
+          type: string
+          format: uuid
+      - in: query
+        name: currency
+        schema:
+          type: string
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - in: query
+        name: party
+        schema:
+          type: string
+          format: uuid
+      - in: query
+        name: purchase_order
+        schema:
+          type: string
+          format: uuid
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      - in: query
+        name: status
+        schema:
+          type: string
+          enum:
+          - ACKNOWLEDGED
+          - PENDING
+        description: |-
+          * `PENDING` - Pending
+          * `ACKNOWLEDGED` - Acknowledged
+      - in: query
+        name: supplier_offer
+        schema:
+          type: string
+          format: uuid
+      tags:
+      - ledger
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedTransactionList'
+          description: ''
+    post:
+      operationId: ledger_transactions_create
+      tags:
+      - ledger
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Transaction'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Transaction'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Transaction'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Transaction'
+          description: ''
+  /ledger/transactions/{id}/:
+    get:
+      operationId: ledger_transactions_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this transaction.
+        required: true
+      tags:
+      - ledger
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Transaction'
+          description: ''
+    put:
+      operationId: ledger_transactions_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this transaction.
+        required: true
+      tags:
+      - ledger
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Transaction'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Transaction'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Transaction'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Transaction'
+          description: ''
+    patch:
+      operationId: ledger_transactions_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this transaction.
+        required: true
+      tags:
+      - ledger
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedTransaction'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedTransaction'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedTransaction'
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Transaction'
+          description: ''
+    delete:
+      operationId: ledger_transactions_destroy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this transaction.
+        required: true
+      tags:
+      - ledger
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /ledger/transactions/balance/:
+    get:
+      operationId: ledger_transactions_balance_retrieve
+      description: 'Compute current balance: credits - debits'
+      tags:
+      - ledger
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Transaction'
+          description: ''
+  /notifications/:
+    get:
+      operationId: notifications_list
+      parameters:
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - Notifications
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedNotificationInboxList'
+          description: ''
+  /notifications/{id}/:
+    get:
+      operationId: notifications_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        required: true
+      tags:
+      - Notifications
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationInbox'
+          description: ''
+  /notifications/{id}/archive/:
+    post:
+      operationId: notifications_archive_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        required: true
+      tags:
+      - notifications
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NotificationInbox'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/NotificationInbox'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/NotificationInbox'
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationInbox'
+          description: ''
+  /notifications/{id}/dismiss/:
+    post:
+      operationId: notifications_dismiss_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        required: true
+      tags:
+      - notifications
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NotificationInbox'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/NotificationInbox'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/NotificationInbox'
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationInbox'
+          description: ''
+  /notifications/{id}/read/:
+    post:
+      operationId: notifications_read_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        required: true
+      tags:
+      - notifications
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NotificationInbox'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/NotificationInbox'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/NotificationInbox'
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationInbox'
+          description: ''
+  /notifications/{id}/restore/:
+    post:
+      operationId: notifications_restore_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        required: true
+      tags:
+      - notifications
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NotificationInbox'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/NotificationInbox'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/NotificationInbox'
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationInbox'
+          description: ''
+  /notifications/{id}/seen/:
+    post:
+      operationId: notifications_seen_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        required: true
+      tags:
+      - notifications
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NotificationInbox'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/NotificationInbox'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/NotificationInbox'
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationInbox'
+          description: ''
+  /notifications/{id}/unread/:
+    post:
+      operationId: notifications_unread_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        required: true
+      tags:
+      - notifications
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NotificationInbox'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/NotificationInbox'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/NotificationInbox'
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationInbox'
+          description: ''
+  /notifications/archive-all-read/:
+    post:
+      operationId: notifications_archive_all_read_create
+      tags:
+      - notifications
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NotificationInbox'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/NotificationInbox'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/NotificationInbox'
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationInbox'
+          description: ''
+  /notifications/deliveries/:
+    get:
+      operationId: notifications_deliveries_list
+      parameters:
+      - in: query
+        name: category
+        schema:
+          type: string
+      - in: query
+        name: channel
+        schema:
+          type: string
+          enum:
+          - DASHBOARD
+          - EMAIL
+          - WHATSAPP
+        description: |-
+          * `DASHBOARD` - Dashboard
+          * `EMAIL` - Email
+          * `WHATSAPP` - WhatsApp
+      - in: query
+        name: created_after
+        schema:
+          type: string
+          format: date-time
+      - in: query
+        name: created_before
+        schema:
+          type: string
+          format: date-time
+      - in: query
+        name: notification_type
+        schema:
+          type: string
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - in: query
+        name: provider
+        schema:
+          type: string
+      - in: query
+        name: recipient
+        schema:
+          type: string
+          format: uuid
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      - in: query
+        name: status
+        schema:
+          type: string
+          enum:
+          - CANCELLED
+          - DELIVERED
+          - FAILED
+          - PENDING
+          - PROCESSING
+          - READ
+          - RETRYING
+          - SENT
+          - SKIPPED
+        description: |-
+          * `PENDING` - Pending
+          * `PROCESSING` - Processing
+          * `SENT` - Sent
+          * `DELIVERED` - Delivered
+          * `READ` - Read
+          * `RETRYING` - Retrying
+          * `FAILED` - Failed
+          * `SKIPPED` - Skipped
+          * `CANCELLED` - Cancelled
+      tags:
+      - Notification Administration
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedNotificationDeliveryAdminList'
+          description: ''
+  /notifications/deliveries/{id}/:
+    get:
+      operationId: notifications_deliveries_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this notification delivery.
+        required: true
+      tags:
+      - Notification Administration
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationDeliveryAdmin'
+          description: ''
+  /notifications/deliveries/{id}/retry/:
+    post:
+      operationId: notifications_deliveries_retry_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this notification delivery.
+        required: true
+      tags:
+      - notifications
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NotificationDeliveryAdmin'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/NotificationDeliveryAdmin'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/NotificationDeliveryAdmin'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationDeliveryAdmin'
+          description: ''
+  /notifications/dispatch/:
+    post:
+      operationId: notifications_dispatch_create
+      tags:
+      - Notification Administration
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NotificationDispatch'
+            examples:
+              SharedDashboardAndEmailNotification:
+                value:
+                  recipient_ids:
+                  - 00000000-0000-0000-0000-000000000001
+                  notification_type: general.message
+                  category: general
+                  title: New company update
+                  message: A new company update is available.
+                  channels:
+                  - DASHBOARD
+                  - EMAIL
+                  event_mode: SHARED
+                  action_url: /dashboard
+                  action_label: Open dashboard
+                summary: Shared dashboard and email notification
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/NotificationDispatch'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/NotificationDispatch'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /notifications/mark-all-read/:
+    post:
+      operationId: notifications_mark_all_read_create
+      tags:
+      - notifications
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NotificationInbox'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/NotificationInbox'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/NotificationInbox'
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationInbox'
+          description: ''
+  /notifications/preferences/:
+    get:
+      operationId: notifications_preferences_list
+      parameters:
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      tags:
+      - Notification Preferences
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedNotificationPreferenceList'
+          description: ''
+    post:
+      operationId: notifications_preferences_create
+      tags:
+      - Notification Preferences
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NotificationPreference'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/NotificationPreference'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/NotificationPreference'
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationPreference'
+          description: ''
+  /notifications/preferences/{id}/:
+    get:
+      operationId: notifications_preferences_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        required: true
+      tags:
+      - Notification Preferences
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationPreference'
+          description: ''
+    put:
+      operationId: notifications_preferences_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        required: true
+      tags:
+      - Notification Preferences
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NotificationPreference'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/NotificationPreference'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/NotificationPreference'
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationPreference'
+          description: ''
+    patch:
+      operationId: notifications_preferences_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        required: true
+      tags:
+      - Notification Preferences
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedNotificationPreference'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedNotificationPreference'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedNotificationPreference'
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationPreference'
+          description: ''
+    delete:
+      operationId: notifications_preferences_destroy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        required: true
+      tags:
+      - Notification Preferences
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /notifications/templates/:
+    get:
+      operationId: notifications_templates_list
+      parameters:
+      - in: query
+        name: channel
+        schema:
+          type: string
+          enum:
+          - DASHBOARD
+          - EMAIL
+          - WHATSAPP
+        description: |-
+          * `DASHBOARD` - Dashboard
+          * `EMAIL` - Email
+          * `WHATSAPP` - WhatsApp
+      - in: query
+        name: is_active
+        schema:
+          type: boolean
+      - in: query
+        name: key
+        schema:
+          type: string
+      - in: query
+        name: language
+        schema:
+          type: string
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - Notification Administration
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedNotificationTemplateList'
+          description: ''
+    post:
+      operationId: notifications_templates_create
+      tags:
+      - Notification Administration
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NotificationTemplate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/NotificationTemplate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/NotificationTemplate'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationTemplate'
+          description: ''
+  /notifications/templates/{id}/:
+    get:
+      operationId: notifications_templates_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this notification template.
+        required: true
+      tags:
+      - Notification Administration
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationTemplate'
+          description: ''
+    put:
+      operationId: notifications_templates_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this notification template.
+        required: true
+      tags:
+      - Notification Administration
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NotificationTemplate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/NotificationTemplate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/NotificationTemplate'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationTemplate'
+          description: ''
+    patch:
+      operationId: notifications_templates_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this notification template.
+        required: true
+      tags:
+      - Notification Administration
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedNotificationTemplate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedNotificationTemplate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedNotificationTemplate'
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationTemplate'
+          description: ''
+    delete:
+      operationId: notifications_templates_destroy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this notification template.
+        required: true
+      tags:
+      - Notification Administration
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /notifications/unread-count/:
+    get:
+      operationId: notifications_unread_count_retrieve
+      tags:
+      - notifications
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationInbox'
+          description: ''
+  /procurement/client-requests/:
+    get:
+      operationId: procurement_client_requests_list
+      parameters:
+      - in: query
+        name: brand
+        schema:
+          type: string
+      - in: query
+        name: client
+        schema:
+          type: string
+          format: uuid
+      - in: query
+        name: item_name
+        schema:
+          type: string
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      - in: query
+        name: status
+        schema:
+          type: string
+          enum:
+          - completed
+          - discarded
+          - pending
+          - processing
+        description: |-
+          * `pending` - Pending
+          * `processing` - Processing
+          * `discarded` - Discarded
+          * `completed` - Completed
+      tags:
+      - procurement
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedClientRequestList'
+          description: ''
+    post:
+      operationId: procurement_client_requests_create
+      tags:
+      - procurement
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClientRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ClientRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ClientRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientRequest'
+          description: ''
+  /procurement/client-requests/{id}/:
+    get:
+      operationId: procurement_client_requests_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this client request.
+        required: true
+      tags:
+      - procurement
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientRequest'
+          description: ''
+    put:
+      operationId: procurement_client_requests_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this client request.
+        required: true
+      tags:
+      - procurement
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClientRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ClientRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ClientRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientRequest'
+          description: ''
+    patch:
+      operationId: procurement_client_requests_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this client request.
+        required: true
+      tags:
+      - procurement
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedClientRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedClientRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedClientRequest'
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientRequest'
+          description: ''
+    delete:
+      operationId: procurement_client_requests_destroy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this client request.
+        required: true
+      tags:
+      - procurement
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /procurement/po-tracker/:
+    get:
+      operationId: procurement_po_tracker_list
+      parameters:
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - in: query
+        name: purchase_order
+        schema:
+          type: string
+          format: uuid
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      - in: query
+        name: status
+        schema:
+          type: string
+          enum:
+          - accepted
+          - canceled
+          - delivered
+          - ordered
+          - pending
+          - ready
+          - rejected
+        description: |-
+          * `pending` - Pending
+          * `ordered` - Item Ordered
+          * `ready` - Ready for Delivery
+          * `canceled` - Canceled
+          * `delivered` - Delivered
+          * `accepted` - Accepted
+          * `rejected` - Rejected
+      tags:
+      - procurement
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedPOTrackerList'
+          description: ''
+    post:
+      operationId: procurement_po_tracker_create
+      tags:
+      - procurement
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/POTracker'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/POTracker'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/POTracker'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/POTracker'
+          description: ''
+  /procurement/po-tracker/{id}/:
+    get:
+      operationId: procurement_po_tracker_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this po tracker.
+        required: true
+      tags:
+      - procurement
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/POTracker'
+          description: ''
+    put:
+      operationId: procurement_po_tracker_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this po tracker.
+        required: true
+      tags:
+      - procurement
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/POTracker'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/POTracker'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/POTracker'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/POTracker'
+          description: ''
+    patch:
+      operationId: procurement_po_tracker_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this po tracker.
+        required: true
+      tags:
+      - procurement
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedPOTracker'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedPOTracker'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedPOTracker'
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/POTracker'
+          description: ''
+    delete:
+      operationId: procurement_po_tracker_destroy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this po tracker.
+        required: true
+      tags:
+      - procurement
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /procurement/purchase-orders/:
+    get:
+      operationId: procurement_purchase_orders_list
+      parameters:
+      - in: query
+        name: client
+        schema:
+          type: string
+          format: uuid
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      - in: query
+        name: status
+        schema:
+          type: string
+          enum:
+          - accepted
+          - canceled
+          - delivered
+          - ordered
+          - pending
+          - ready
+          - rejected
+        description: |-
+          * `pending` - Pending
+          * `ordered` - Item Ordered
+          * `ready` - Ready for Delivery
+          * `canceled` - Canceled
+          * `delivered` - Delivered
+          * `accepted` - Accepted
+          * `rejected` - Rejected
+      - in: query
+        name: supplier_quote
+        schema:
+          type: string
+          format: uuid
+      tags:
+      - procurement
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedPurchaseOrderList'
+          description: ''
+    post:
+      operationId: procurement_purchase_orders_create
+      tags:
+      - procurement
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PurchaseOrder'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PurchaseOrder'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PurchaseOrder'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PurchaseOrder'
+          description: ''
+  /procurement/purchase-orders/{id}/:
+    get:
+      operationId: procurement_purchase_orders_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this purchase order.
+        required: true
+      tags:
+      - procurement
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PurchaseOrder'
+          description: ''
+    put:
+      operationId: procurement_purchase_orders_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this purchase order.
+        required: true
+      tags:
+      - procurement
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PurchaseOrder'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PurchaseOrder'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PurchaseOrder'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PurchaseOrder'
+          description: ''
+    patch:
+      operationId: procurement_purchase_orders_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this purchase order.
+        required: true
+      tags:
+      - procurement
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedPurchaseOrder'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedPurchaseOrder'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedPurchaseOrder'
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PurchaseOrder'
+          description: ''
+    delete:
+      operationId: procurement_purchase_orders_destroy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this purchase order.
+        required: true
+      tags:
+      - procurement
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /procurement/supplier-quotes/:
+    get:
+      operationId: procurement_supplier_quotes_list
+      parameters:
+      - in: query
+        name: client_request
+        schema:
+          type: string
+          format: uuid
+      - in: query
+        name: import_type
+        schema:
+          type: string
+          enum:
+          - imported
+          - local
+        description: |-
+          * `local` - Local
+          * `imported` - Imported
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      - in: query
+        name: supplier
+        schema:
+          type: string
+          format: uuid
+      tags:
+      - procurement
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedSupplierQuoteList'
+          description: ''
+    post:
+      operationId: procurement_supplier_quotes_create
+      tags:
+      - procurement
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SupplierQuote'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/SupplierQuote'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/SupplierQuote'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupplierQuote'
+          description: ''
+  /procurement/supplier-quotes/{id}/:
+    get:
+      operationId: procurement_supplier_quotes_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this supplier quote.
+        required: true
+      tags:
+      - procurement
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupplierQuote'
+          description: ''
+    put:
+      operationId: procurement_supplier_quotes_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this supplier quote.
+        required: true
+      tags:
+      - procurement
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SupplierQuote'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/SupplierQuote'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/SupplierQuote'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupplierQuote'
+          description: ''
+    patch:
+      operationId: procurement_supplier_quotes_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this supplier quote.
+        required: true
+      tags:
+      - procurement
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedSupplierQuote'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedSupplierQuote'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedSupplierQuote'
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupplierQuote'
+          description: ''
+    delete:
+      operationId: procurement_supplier_quotes_destroy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this supplier quote.
+        required: true
+      tags:
+      - procurement
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /token/:
+    post:
+      operationId: token_create
+      description: |-
+        Takes a set of user credentials and returns an access and refresh JSON web
+        token pair to prove the authentication of those credentials.
+      tags:
+      - token
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HolanTokenObtainPair'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/HolanTokenObtainPair'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/HolanTokenObtainPair'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HolanTokenObtainPair'
+          description: ''
+  /token/refresh/:
+    post:
+      operationId: token_refresh_create
+      description: |-
+        Takes a refresh type JSON web token and returns an access type JSON web
+        token if the refresh token is valid.
+      tags:
+      - token
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TokenRefresh'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TokenRefresh'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TokenRefresh'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenRefresh'
+          description: ''
+components:
+  schemas:
+    AuditLog:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        user:
+          allOf:
+          - $ref: '#/components/schemas/AuditUserSummary'
+          readOnly: true
+        target_user:
+          allOf:
+          - $ref: '#/components/schemas/AuditUserSummary'
+          readOnly: true
+        event_category:
+          allOf:
+          - $ref: '#/components/schemas/EventCategoryEnum'
+          readOnly: true
+        event_type:
+          allOf:
+          - $ref: '#/components/schemas/EventTypeEnum'
+          readOnly: true
+        status:
+          allOf:
+          - $ref: '#/components/schemas/AuditLogStatusEnum'
+          readOnly: true
+        username_attempted:
+          type: string
+          readOnly: true
+          description: Username/email submitted during login attempt.
+        app_label:
+          type: string
+          readOnly: true
+        resource:
+          type: string
+          readOnly: true
+        action:
+          type: string
+          readOnly: true
+        object_id:
+          type: string
+          readOnly: true
+        ip_address:
+          type: string
+          readOnly: true
+          nullable: true
+        user_agent:
+          type: string
+          readOnly: true
+        metadata:
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - action
+      - app_label
+      - created_at
+      - event_category
+      - event_type
+      - id
+      - ip_address
+      - metadata
+      - object_id
+      - resource
+      - status
+      - target_user
+      - user
+      - user_agent
+      - username_attempted
+    AuditLogStatusEnum:
+      enum:
+      - SUCCESS
+      - FAILED
+      type: string
+      description: |-
+        * `SUCCESS` - Success
+        * `FAILED` - Failed
+    AuditUserSummary:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        username:
+          type: string
+          description: Required. 150 characters or fewer. Letters, digits and @/./+/-/_
+            only.
+          pattern: ^[\w.@+-]+$
+          maxLength: 150
+        email:
+          type: string
+          format: email
+          title: Email address
+          maxLength: 254
+        first_name:
+          type: string
+          maxLength: 150
+        last_name:
+          type: string
+          maxLength: 150
+      required:
+      - email
+      - id
+      - username
+    BlankEnum:
+      enum:
+      - ''
+    Category:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        name:
+          type: string
+          maxLength: 100
+        description:
+          type: string
+          nullable: true
+        flow:
+          $ref: '#/components/schemas/FlowEnum'
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created_at
+      - flow
+      - id
+      - name
+      - updated_at
+    ChannelEnum:
+      enum:
+      - DASHBOARD
+      - EMAIL
+      - WHATSAPP
+      type: string
+      description: |-
+        * `DASHBOARD` - Dashboard
+        * `EMAIL` - Email
+        * `WHATSAPP` - WhatsApp
+    ChannelsEnum:
+      enum:
+      - DASHBOARD
+      - EMAIL
+      - WHATSAPP
+      type: string
+      description: |-
+        * `DASHBOARD` - Dashboard
+        * `EMAIL` - Email
+        * `WHATSAPP` - WhatsApp
+    ClientRequest:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        client_name:
+          type: string
+          readOnly: true
+        supplier_quotes:
+          type: array
+          items:
+            $ref: '#/components/schemas/SupplierQuote'
+          readOnly: true
+        contact_person_name:
+          type: string
+          readOnly: true
+        item_name:
+          type: string
+          maxLength: 255
+        specification:
+          type: string
+          nullable: true
+        model:
+          type: string
+          nullable: true
+          maxLength: 100
+        brand:
+          type: string
+          nullable: true
+          maxLength: 100
+        uom:
+          type: string
+          maxLength: 50
+        quantity:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+        status:
+          $ref: '#/components/schemas/ClientRequestStatusEnum'
+        comments:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+        client:
+          type: string
+          format: uuid
+        contact_person:
+          type: string
+          format: uuid
+          nullable: true
+      required:
+      - client
+      - client_name
+      - contact_person_name
+      - created_at
+      - id
+      - item_name
+      - quantity
+      - supplier_quotes
+      - uom
+      - updated_at
+    ClientRequestStatusEnum:
+      enum:
+      - pending
+      - processing
+      - discarded
+      - completed
+      type: string
+      description: |-
+        * `pending` - Pending
+        * `processing` - Processing
+        * `discarded` - Discarded
+        * `completed` - Completed
+    ContactPerson:
+      type: object
+      description: |-
+        Serializer for the ContactPerson model.
+        This is the main serializer for the creation process.
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        first_name:
+          type: string
+          maxLength: 100
+        last_name:
+          type: string
+          nullable: true
+          maxLength: 100
+        email:
+          type: string
+          format: email
+          nullable: true
+          maxLength: 254
+        phone:
+          type: string
+          nullable: true
+          maxLength: 50
+        party:
+          allOf:
+          - $ref: '#/components/schemas/Party'
+          readOnly: true
+        party_id:
+          type: string
+          format: uuid
+          writeOnly: true
+        new_party:
+          allOf:
+          - $ref: '#/components/schemas/Party'
+          writeOnly: true
+      required:
+      - first_name
+      - id
+      - party
+    CurrentUser:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        username:
+          type: string
+          description: Required. 150 characters or fewer. Letters, digits and @/./+/-/_
+            only.
+          pattern: ^[\w.@+-]+$
+          maxLength: 150
+        email:
+          type: string
+          format: email
+          title: Email address
+          maxLength: 254
+        first_name:
+          type: string
+          maxLength: 150
+        last_name:
+          type: string
+          maxLength: 150
+        is_staff:
+          type: boolean
+          title: Staff status
+          description: Designates whether the user can log into this admin site.
+        is_superuser:
+          type: boolean
+          title: Superuser status
+          description: Designates that this user has all permissions without explicitly
+            assigning them.
+        roles:
+          type: string
+          readOnly: true
+        permissions:
+          type: string
+          readOnly: true
+        profile:
+          allOf:
+          - $ref: '#/components/schemas/StaffProfileWrite'
+          readOnly: true
+      required:
+      - email
+      - id
+      - permissions
+      - profile
+      - roles
+      - username
+    Department:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        name:
+          type: string
+          description: The name of the department.
+          maxLength: 150
+        code:
+          type: string
+          description: A short code for the department (e.g., HR, FIN, PRO).
+          maxLength: 5
+        description:
+          type: string
+          nullable: true
+          description: A brief description of the department's function.
+      required:
+      - code
+      - id
+      - name
+    DepartmentSummary:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        name:
+          type: string
+          description: The name of the department.
+          maxLength: 150
+        code:
+          type: string
+          description: A short code for the department (e.g., HR, FIN, PRO).
+          maxLength: 5
+      required:
+      - code
+      - id
+      - name
+    EmploymentTypeEnum:
+      enum:
+      - FT
+      - PT
+      - CT
+      - IN
+      type: string
+      description: |-
+        * `FT` - Full-Time
+        * `PT` - Part-Time
+        * `CT` - Contract
+        * `IN` - Intern
+    EventCategoryEnum:
+      enum:
+      - AUTH
+      - CRUD
+      - SYSTEM
+      - SECURITY
+      type: string
+      description: |-
+        * `AUTH` - Authentication
+        * `CRUD` - CRUD Activity
+        * `SYSTEM` - System
+        * `SECURITY` - Security
+    EventModeEnum:
+      enum:
+      - SHARED
+      - INDIVIDUAL
+      type: string
+      description: |-
+        * `SHARED` - One event with many recipients
+        * `INDIVIDUAL` - One event per recipient
+    EventTypeEnum:
+      enum:
+      - LOGIN_SUCCESS
+      - LOGIN_FAILED
+      - LOGOUT
+      - ACCOUNT_CREATED
+      - DEFAULT_PASSWORD_LOGIN_BLOCKED
+      - PASSWORD_RESET_LINK_SENT
+      - PASSWORD_RESET_CODE_VERIFIED
+      - PASSWORD_RESET_COMPLETED
+      - PASSWORD_RESET_FAILED
+      - PASSWORD_RESET_REQUESTED
+      - PASSWORD_RESET_EMAIL_FAILED
+      - CREATE
+      - READ
+      - UPDATE
+      - DELETE
+      type: string
+      description: |-
+        * `LOGIN_SUCCESS` - Login Success
+        * `LOGIN_FAILED` - Login Failed
+        * `LOGOUT` - Logout
+        * `ACCOUNT_CREATED` - Account Created
+        * `DEFAULT_PASSWORD_LOGIN_BLOCKED` - Default Password Login Blocked
+        * `PASSWORD_RESET_LINK_SENT` - Password Reset Link Sent
+        * `PASSWORD_RESET_CODE_VERIFIED` - Password Reset Code Verified
+        * `PASSWORD_RESET_COMPLETED` - Password Reset Completed
+        * `PASSWORD_RESET_FAILED` - Password Reset Failed
+        * `PASSWORD_RESET_REQUESTED` - Password Reset Requested
+        * `PASSWORD_RESET_EMAIL_FAILED` - Password Reset Email Failed
+        * `CREATE` - Create
+        * `READ` - Read
+        * `UPDATE` - Update
+        * `DELETE` - Delete
+    Expectation:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        transactions:
+          type: array
+          items:
+            $ref: '#/components/schemas/TransactionSimple'
+          readOnly: true
+        party_name:
+          type: string
+          readOnly: true
+        interest_rate:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,2})?$
+          nullable: true
+        duration:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          nullable: true
+          description: Duration in days
+        amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,13}(?:\.\d{0,2})?$
+        currency:
+          type: string
+          maxLength: 10
+        compound_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,13}(?:\.\d{0,2})?$
+          nullable: true
+        status:
+          $ref: '#/components/schemas/ExpectationStatusEnum'
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+        category:
+          type: string
+          format: uuid
+          nullable: true
+        party:
+          type: string
+          format: uuid
+          nullable: true
+      required:
+      - amount
+      - created_at
+      - id
+      - party_name
+      - transactions
+      - updated_at
+    ExpectationStatusEnum:
+      enum:
+      - FULFILLED
+      - NOT_FULFILLED
+      - PARTLY_FULFILLED
+      type: string
+      description: |-
+        * `FULFILLED` - Fulfilled
+        * `NOT_FULFILLED` - Not Fulfilled
+        * `PARTLY_FULFILLED` - Partly Fulfilled
+    FlowEnum:
+      enum:
+      - CREDIT
+      - DEBIT
+      type: string
+      description: |-
+        * `CREDIT` - Credit (Money In)
+        * `DEBIT` - Debit (Money Out)
+    HolanTokenObtainPair:
+      type: object
+      properties:
+        username:
+          type: string
+          writeOnly: true
+        password:
+          type: string
+          writeOnly: true
+      required:
+      - password
+      - username
+    ImportTypeEnum:
+      enum:
+      - local
+      - imported
+      type: string
+      description: |-
+        * `local` - Local
+        * `imported` - Imported
+    NotificationActor:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        username:
+          type: string
+          description: Required. 150 characters or fewer. Letters, digits and @/./+/-/_
+            only.
+          pattern: ^[\w.@+-]+$
+          maxLength: 150
+        first_name:
+          type: string
+          maxLength: 150
+        last_name:
+          type: string
+          maxLength: 150
+        display_name:
+          type: string
+          readOnly: true
+      required:
+      - display_name
+      - id
+      - username
+    NotificationDeliveryAdmin:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        notification_id:
+          type: string
+          format: uuid
+          readOnly: true
+        notification_type:
+          type: string
+          readOnly: true
+        recipient_id:
+          type: string
+          format: uuid
+          readOnly: true
+        recipient_name:
+          type: string
+          readOnly: true
+        channel:
+          $ref: '#/components/schemas/ChannelEnum'
+        status:
+          $ref: '#/components/schemas/NotificationDeliveryAdminStatusEnum'
+        destination:
+          type: string
+          maxLength: 255
+        provider:
+          type: string
+          maxLength: 80
+        provider_message_id:
+          type: string
+          maxLength: 255
+        subject:
+          type: string
+          maxLength: 255
+        title:
+          type: string
+          maxLength: 255
+        attempt_count:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+        max_attempts:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+        scheduled_at:
+          type: string
+          format: date-time
+        next_attempt_at:
+          type: string
+          format: date-time
+        last_attempt_at:
+          type: string
+          format: date-time
+          nullable: true
+        sent_at:
+          type: string
+          format: date-time
+          nullable: true
+        delivered_at:
+          type: string
+          format: date-time
+          nullable: true
+        read_at:
+          type: string
+          format: date-time
+          nullable: true
+        failed_at:
+          type: string
+          format: date-time
+          nullable: true
+        error_code:
+          type: string
+          maxLength: 100
+        error_message:
+          type: string
+        response_metadata: {}
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - channel
+      - created_at
+      - id
+      - notification_id
+      - notification_type
+      - recipient_id
+      - recipient_name
+      - updated_at
+    NotificationDeliveryAdminStatusEnum:
+      enum:
+      - PENDING
+      - PROCESSING
+      - SENT
+      - DELIVERED
+      - READ
+      - RETRYING
+      - FAILED
+      - SKIPPED
+      - CANCELLED
+      type: string
+      description: |-
+        * `PENDING` - Pending
+        * `PROCESSING` - Processing
+        * `SENT` - Sent
+        * `DELIVERED` - Delivered
+        * `READ` - Read
+        * `RETRYING` - Retrying
+        * `FAILED` - Failed
+        * `SKIPPED` - Skipped
+        * `CANCELLED` - Cancelled
+    NotificationDispatch:
+      type: object
+      properties:
+        recipient_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        recipient_overrides:
+          type: object
+          additionalProperties:
+            type: object
+            additionalProperties: {}
+        notification_type:
+          type: string
+          maxLength: 120
+        category:
+          type: string
+          maxLength: 60
+          pattern: ^[-a-zA-Z0-9_]+$
+        severity:
+          allOf:
+          - $ref: '#/components/schemas/SeverityEnum'
+          default: INFO
+        title:
+          type: string
+          maxLength: 255
+        message:
+          type: string
+        channels:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChannelsEnum'
+          default:
+          - DASHBOARD
+        event_mode:
+          allOf:
+          - $ref: '#/components/schemas/EventModeEnum'
+          default: SHARED
+        template_key:
+          type: string
+          default: ''
+          pattern: ^[-a-zA-Z0-9_]+$
+        language:
+          type: string
+          default: en
+          maxLength: 12
+        action_url:
+          type: string
+          default: ''
+        action_label:
+          type: string
+          default: ''
+        metadata: {}
+        template_context: {}
+        deduplication_key:
+          type: string
+          nullable: true
+          maxLength: 255
+        is_mandatory:
+          type: boolean
+          default: false
+        scheduled_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+      required:
+      - category
+      - message
+      - notification_type
+      - recipient_ids
+      - title
+    NotificationInbox:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        notification_id:
+          type: string
+          format: uuid
+          readOnly: true
+        notification_type:
+          type: string
+          readOnly: true
+        category:
+          type: string
+          readOnly: true
+        severity:
+          type: string
+          readOnly: true
+        title:
+          type: string
+          readOnly: true
+        message:
+          type: string
+          readOnly: true
+        actor:
+          allOf:
+          - $ref: '#/components/schemas/NotificationActor'
+          readOnly: true
+        action_url:
+          type: string
+          maxLength: 500
+        action_label:
+          type: string
+          maxLength: 100
+        notification_metadata:
+          readOnly: true
+        metadata: {}
+        is_mandatory:
+          type: boolean
+          readOnly: true
+        source:
+          type: string
+          readOnly: true
+        channels:
+          type: string
+          readOnly: true
+        is_seen:
+          type: string
+          readOnly: true
+        is_read:
+          type: string
+          readOnly: true
+        is_archived:
+          type: string
+          readOnly: true
+        seen_at:
+          type: string
+          format: date-time
+          nullable: true
+        read_at:
+          type: string
+          format: date-time
+          nullable: true
+        archived_at:
+          type: string
+          format: date-time
+          nullable: true
+        dismissed_at:
+          type: string
+          format: date-time
+          nullable: true
+        scheduled_at:
+          type: string
+          format: date-time
+          readOnly: true
+        expires_at:
+          type: string
+          format: date-time
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - actor
+      - category
+      - channels
+      - created_at
+      - expires_at
+      - id
+      - is_archived
+      - is_mandatory
+      - is_read
+      - is_seen
+      - message
+      - notification_id
+      - notification_metadata
+      - notification_type
+      - scheduled_at
+      - severity
+      - source
+      - title
+    NotificationPreference:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        category:
+          type: string
+          maxLength: 60
+          pattern: ^[-a-zA-Z0-9_]+$
+        notification_type:
+          type: string
+          maxLength: 120
+        dashboard_enabled:
+          type: boolean
+        email_enabled:
+          type: boolean
+        whatsapp_enabled:
+          type: boolean
+        quiet_hours_start:
+          type: string
+          format: time
+          nullable: true
+        quiet_hours_end:
+          type: string
+          format: time
+          nullable: true
+        timezone_name:
+          type: string
+          maxLength: 64
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created_at
+      - id
+      - updated_at
+    NotificationTemplate:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        key:
+          type: string
+          maxLength: 120
+          pattern: ^[-a-zA-Z0-9_]+$
+        name:
+          type: string
+          maxLength: 150
+        channel:
+          $ref: '#/components/schemas/ChannelEnum'
+        language:
+          type: string
+          default: en
+          maxLength: 12
+        version:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          default: 1
+        subject_template:
+          type: string
+          maxLength: 255
+        title_template:
+          type: string
+          maxLength: 255
+        body_text_template:
+          type: string
+        body_html_template:
+          type: string
+        action_label_template:
+          type: string
+          maxLength: 100
+        is_active:
+          type: boolean
+          default: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - channel
+      - created_at
+      - id
+      - key
+      - name
+      - updated_at
+    NullEnum:
+      enum:
+      - null
+    POTracker:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        status:
+          $ref: '#/components/schemas/Status0c8Enum'
+        description:
+          type: string
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+        purchase_order:
+          type: string
+          format: uuid
+      required:
+      - id
+      - purchase_order
+      - status
+      - updated_at
+    PaginatedAuditLogList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/AuditLog'
+    PaginatedCategoryList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Category'
+    PaginatedClientRequestList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ClientRequest'
+    PaginatedContactPersonList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ContactPerson'
+    PaginatedDepartmentList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Department'
+    PaginatedExpectationList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Expectation'
+    PaginatedNotificationDeliveryAdminList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/NotificationDeliveryAdmin'
+    PaginatedNotificationInboxList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/NotificationInbox'
+    PaginatedNotificationPreferenceList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/NotificationPreference'
+    PaginatedNotificationTemplateList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/NotificationTemplate'
+    PaginatedPOTrackerList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/POTracker'
+    PaginatedPartyList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Party'
+    PaginatedPurchaseOrderList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/PurchaseOrder'
+    PaginatedRoleList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Role'
+    PaginatedStaffProfileReadList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/StaffProfileRead'
+    PaginatedSupplierQuoteList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/SupplierQuote'
+    PaginatedTransactionList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Transaction'
+    PaginatedUserSummaryList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserSummary'
+    Party:
+      type: object
+      description: |-
+        Serializer for the Party model. Used for both displaying
+        and creating new parties.
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        name:
+          type: string
+          maxLength: 255
+        party_type:
+          $ref: '#/components/schemas/PartyTypeEnum'
+        is_organization:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created_at
+      - id
+      - name
+      - party_type
+      - updated_at
+    PartyTypeEnum:
+      enum:
+      - client
+      - supplier
+      - logistics
+      type: string
+      description: |-
+        * `client` - Client
+        * `supplier` - Supplier
+        * `logistics` - Logistics
+    PatchedCategory:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        name:
+          type: string
+          maxLength: 100
+        description:
+          type: string
+          nullable: true
+        flow:
+          $ref: '#/components/schemas/FlowEnum'
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+    PatchedClientRequest:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        client_name:
+          type: string
+          readOnly: true
+        supplier_quotes:
+          type: array
+          items:
+            $ref: '#/components/schemas/SupplierQuote'
+          readOnly: true
+        contact_person_name:
+          type: string
+          readOnly: true
+        item_name:
+          type: string
+          maxLength: 255
+        specification:
+          type: string
+          nullable: true
+        model:
+          type: string
+          nullable: true
+          maxLength: 100
+        brand:
+          type: string
+          nullable: true
+          maxLength: 100
+        uom:
+          type: string
+          maxLength: 50
+        quantity:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+        status:
+          $ref: '#/components/schemas/ClientRequestStatusEnum'
+        comments:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+        client:
+          type: string
+          format: uuid
+        contact_person:
+          type: string
+          format: uuid
+          nullable: true
+    PatchedContactPerson:
+      type: object
+      description: |-
+        Serializer for the ContactPerson model.
+        This is the main serializer for the creation process.
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        first_name:
+          type: string
+          maxLength: 100
+        last_name:
+          type: string
+          nullable: true
+          maxLength: 100
+        email:
+          type: string
+          format: email
+          nullable: true
+          maxLength: 254
+        phone:
+          type: string
+          nullable: true
+          maxLength: 50
+        party:
+          allOf:
+          - $ref: '#/components/schemas/Party'
+          readOnly: true
+        party_id:
+          type: string
+          format: uuid
+          writeOnly: true
+        new_party:
+          allOf:
+          - $ref: '#/components/schemas/Party'
+          writeOnly: true
+    PatchedDepartment:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        name:
+          type: string
+          description: The name of the department.
+          maxLength: 150
+        code:
+          type: string
+          description: A short code for the department (e.g., HR, FIN, PRO).
+          maxLength: 5
+        description:
+          type: string
+          nullable: true
+          description: A brief description of the department's function.
+    PatchedExpectation:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        transactions:
+          type: array
+          items:
+            $ref: '#/components/schemas/TransactionSimple'
+          readOnly: true
+        party_name:
+          type: string
+          readOnly: true
+        interest_rate:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,2})?$
+          nullable: true
+        duration:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          nullable: true
+          description: Duration in days
+        amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,13}(?:\.\d{0,2})?$
+        currency:
+          type: string
+          maxLength: 10
+        compound_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,13}(?:\.\d{0,2})?$
+          nullable: true
+        status:
+          $ref: '#/components/schemas/ExpectationStatusEnum'
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+        category:
+          type: string
+          format: uuid
+          nullable: true
+        party:
+          type: string
+          format: uuid
+          nullable: true
+    PatchedNotificationPreference:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        category:
+          type: string
+          maxLength: 60
+          pattern: ^[-a-zA-Z0-9_]+$
+        notification_type:
+          type: string
+          maxLength: 120
+        dashboard_enabled:
+          type: boolean
+        email_enabled:
+          type: boolean
+        whatsapp_enabled:
+          type: boolean
+        quiet_hours_start:
+          type: string
+          format: time
+          nullable: true
+        quiet_hours_end:
+          type: string
+          format: time
+          nullable: true
+        timezone_name:
+          type: string
+          maxLength: 64
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+    PatchedNotificationTemplate:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        key:
+          type: string
+          maxLength: 120
+          pattern: ^[-a-zA-Z0-9_]+$
+        name:
+          type: string
+          maxLength: 150
+        channel:
+          $ref: '#/components/schemas/ChannelEnum'
+        language:
+          type: string
+          default: en
+          maxLength: 12
+        version:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          default: 1
+        subject_template:
+          type: string
+          maxLength: 255
+        title_template:
+          type: string
+          maxLength: 255
+        body_text_template:
+          type: string
+        body_html_template:
+          type: string
+        action_label_template:
+          type: string
+          maxLength: 100
+        is_active:
+          type: boolean
+          default: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+    PatchedPOTracker:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        status:
+          $ref: '#/components/schemas/Status0c8Enum'
+        description:
+          type: string
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+        purchase_order:
+          type: string
+          format: uuid
+    PatchedParty:
+      type: object
+      description: |-
+        Serializer for the Party model. Used for both displaying
+        and creating new parties.
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        name:
+          type: string
+          maxLength: 255
+        party_type:
+          $ref: '#/components/schemas/PartyTypeEnum'
+        is_organization:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+    PatchedPurchaseOrder:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        client_name:
+          type: string
+          readOnly: true
+        supplier_name:
+          type: string
+          readOnly: true
+        item_name:
+          type: string
+          readOnly: true
+        item_brand:
+          type: string
+          readOnly: true
+        request_id:
+          type: string
+          readOnly: true
+        trackers:
+          type: array
+          items:
+            $ref: '#/components/schemas/POTracker'
+          readOnly: true
+        po_number:
+          type: string
+          maxLength: 100
+        quantity:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+        uom:
+          type: string
+          maxLength: 50
+        price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,10}(?:\.\d{0,2})?$
+        expiry_date:
+          type: string
+          format: date
+          nullable: true
+        status:
+          $ref: '#/components/schemas/Status0c8Enum'
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        client:
+          type: string
+          format: uuid
+        supplier_quote:
+          type: string
+          format: uuid
+    PatchedRole:
+      type: object
+      description: Updated serializer for the Role model to allow assigning permissions.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 150
+        permissions:
+          type: array
+          items:
+            type: integer
+    PatchedStaffProfileWrite:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        user:
+          allOf:
+          - $ref: '#/components/schemas/UserCreateNested'
+          writeOnly: true
+        employee_id:
+          type: string
+          readOnly: true
+        job_title:
+          type: string
+          maxLength: 100
+        employment_type:
+          $ref: '#/components/schemas/EmploymentTypeEnum'
+        start_date:
+          type: string
+          format: date
+        end_date:
+          type: string
+          format: date
+          nullable: true
+        phone_number:
+          type: string
+          maxLength: 20
+        address:
+          type: string
+          maxLength: 255
+        middle_name:
+          type: string
+          maxLength: 100
+        sex:
+          nullable: true
+          oneOf:
+          - $ref: '#/components/schemas/SexEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        date_of_birth:
+          type: string
+          format: date
+          nullable: true
+        nationality:
+          type: string
+          maxLength: 100
+        department:
+          type: string
+          format: uuid
+          nullable: true
+        roles:
+          type: array
+          items:
+            type: integer
+            writeOnly: true
+          writeOnly: true
+        is_active:
+          type: boolean
+          writeOnly: true
+        is_staff:
+          type: boolean
+          writeOnly: true
+    PatchedSupplierQuote:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        supplier:
+          type: string
+          format: uuid
+        supplier_name:
+          type: string
+          readOnly: true
+        client_request:
+          type: string
+          format: uuid
+        price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,10}(?:\.\d{0,2})?$
+        import_type:
+          $ref: '#/components/schemas/ImportTypeEnum'
+        currency:
+          type: string
+          maxLength: 10
+        quoted_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,10}(?:\.\d{0,2})?$
+          nullable: true
+        lead_time_days:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          nullable: true
+        comments:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        client_request_details:
+          type: string
+          readOnly: true
+    PatchedTransaction:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        category:
+          type: string
+          format: uuid
+          nullable: true
+        expectation:
+          type: string
+          format: uuid
+          nullable: true
+        name:
+          type: string
+          maxLength: 100
+        description:
+          type: string
+          nullable: true
+        date:
+          type: string
+          format: date-time
+        status:
+          $ref: '#/components/schemas/Status594Enum'
+        amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,13}(?:\.\d{0,2})?$
+        currency:
+          type: string
+          maxLength: 10
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+        party:
+          type: string
+          format: uuid
+          nullable: true
+        supplier_offer:
+          type: string
+          format: uuid
+          nullable: true
+        purchase_order:
+          type: string
+          format: uuid
+          nullable: true
+        expectations:
+          type: string
+          format: uuid
+          nullable: true
+    PatchedUserWrite:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        username:
+          type: string
+          description: Required. 150 characters or fewer. Letters, digits and @/./+/-/_
+            only.
+          pattern: ^[\w.@+-]+$
+          maxLength: 150
+        email:
+          type: string
+          format: email
+          title: Email address
+          maxLength: 254
+        first_name:
+          type: string
+          maxLength: 150
+        last_name:
+          type: string
+          maxLength: 150
+        is_active:
+          type: boolean
+          title: Active
+          description: Designates whether this user should be treated as active. Unselect
+            this instead of deleting accounts.
+        is_staff:
+          type: boolean
+          title: Staff status
+          description: Designates whether the user can log into this admin site.
+        roles:
+          type: array
+          items:
+            type: integer
+    Permission:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 255
+        codename:
+          type: string
+          maxLength: 100
+      required:
+      - codename
+      - id
+      - name
+    PurchaseOrder:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        client_name:
+          type: string
+          readOnly: true
+        supplier_name:
+          type: string
+          readOnly: true
+        item_name:
+          type: string
+          readOnly: true
+        item_brand:
+          type: string
+          readOnly: true
+        request_id:
+          type: string
+          readOnly: true
+        trackers:
+          type: array
+          items:
+            $ref: '#/components/schemas/POTracker'
+          readOnly: true
+        po_number:
+          type: string
+          maxLength: 100
+        quantity:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+        uom:
+          type: string
+          maxLength: 50
+        price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,10}(?:\.\d{0,2})?$
+        expiry_date:
+          type: string
+          format: date
+          nullable: true
+        status:
+          $ref: '#/components/schemas/Status0c8Enum'
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        client:
+          type: string
+          format: uuid
+        supplier_quote:
+          type: string
+          format: uuid
+      required:
+      - client
+      - client_name
+      - created_at
+      - id
+      - item_brand
+      - item_name
+      - po_number
+      - price
+      - quantity
+      - request_id
+      - supplier_name
+      - supplier_quote
+      - trackers
+      - uom
+    Role:
+      type: object
+      description: Updated serializer for the Role model to allow assigning permissions.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 150
+        permissions:
+          type: array
+          items:
+            type: integer
+      required:
+      - id
+      - name
+      - permissions
+    RoleSummary:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 150
+      required:
+      - id
+      - name
+    SeverityEnum:
+      enum:
+      - INFO
+      - SUCCESS
+      - WARNING
+      - ERROR
+      - URGENT
+      type: string
+      description: |-
+        * `INFO` - Information
+        * `SUCCESS` - Success
+        * `WARNING` - Warning
+        * `ERROR` - Error
+        * `URGENT` - Urgent
+    SexEnum:
+      enum:
+      - M
+      - F
+      type: string
+      description: |-
+        * `M` - Male
+        * `F` - Female
+    StaffProfileRead:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        employee_id:
+          type: string
+          readOnly: true
+        job_title:
+          type: string
+          maxLength: 100
+        employment_type:
+          $ref: '#/components/schemas/EmploymentTypeEnum'
+        start_date:
+          type: string
+          format: date
+        end_date:
+          type: string
+          format: date
+          nullable: true
+        phone_number:
+          type: string
+          maxLength: 20
+        address:
+          type: string
+          maxLength: 255
+        middle_name:
+          type: string
+          maxLength: 100
+        sex:
+          nullable: true
+          oneOf:
+          - $ref: '#/components/schemas/SexEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        date_of_birth:
+          type: string
+          format: date
+          nullable: true
+        nationality:
+          type: string
+          maxLength: 100
+        department:
+          allOf:
+          - $ref: '#/components/schemas/DepartmentSummary'
+          readOnly: true
+        user:
+          allOf:
+          - $ref: '#/components/schemas/UserSummary'
+          readOnly: true
+      required:
+      - department
+      - employee_id
+      - id
+      - job_title
+      - phone_number
+      - start_date
+      - user
+    StaffProfileWrite:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        user:
+          allOf:
+          - $ref: '#/components/schemas/UserCreateNested'
+          writeOnly: true
+        employee_id:
+          type: string
+          readOnly: true
+        job_title:
+          type: string
+          maxLength: 100
+        employment_type:
+          $ref: '#/components/schemas/EmploymentTypeEnum'
+        start_date:
+          type: string
+          format: date
+        end_date:
+          type: string
+          format: date
+          nullable: true
+        phone_number:
+          type: string
+          maxLength: 20
+        address:
+          type: string
+          maxLength: 255
+        middle_name:
+          type: string
+          maxLength: 100
+        sex:
+          nullable: true
+          oneOf:
+          - $ref: '#/components/schemas/SexEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        date_of_birth:
+          type: string
+          format: date
+          nullable: true
+        nationality:
+          type: string
+          maxLength: 100
+        department:
+          type: string
+          format: uuid
+          nullable: true
+        roles:
+          type: array
+          items:
+            type: integer
+            writeOnly: true
+          writeOnly: true
+        is_active:
+          type: boolean
+          writeOnly: true
+        is_staff:
+          type: boolean
+          writeOnly: true
+      required:
+      - employee_id
+      - id
+      - job_title
+      - phone_number
+      - start_date
+    Status0c8Enum:
+      enum:
+      - pending
+      - ordered
+      - ready
+      - canceled
+      - delivered
+      - accepted
+      - rejected
+      type: string
+      description: |-
+        * `pending` - Pending
+        * `ordered` - Item Ordered
+        * `ready` - Ready for Delivery
+        * `canceled` - Canceled
+        * `delivered` - Delivered
+        * `accepted` - Accepted
+        * `rejected` - Rejected
+    Status594Enum:
+      enum:
+      - PENDING
+      - ACKNOWLEDGED
+      type: string
+      description: |-
+        * `PENDING` - Pending
+        * `ACKNOWLEDGED` - Acknowledged
+    SupplierQuote:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        supplier:
+          type: string
+          format: uuid
+        supplier_name:
+          type: string
+          readOnly: true
+        client_request:
+          type: string
+          format: uuid
+        price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,10}(?:\.\d{0,2})?$
+        import_type:
+          $ref: '#/components/schemas/ImportTypeEnum'
+        currency:
+          type: string
+          maxLength: 10
+        quoted_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,10}(?:\.\d{0,2})?$
+          nullable: true
+        lead_time_days:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          nullable: true
+        comments:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        client_request_details:
+          type: string
+          readOnly: true
+      required:
+      - client_request
+      - client_request_details
+      - created_at
+      - id
+      - price
+      - supplier
+      - supplier_name
+    TokenRefresh:
+      type: object
+      properties:
+        access:
+          type: string
+          readOnly: true
+        refresh:
+          type: string
+          writeOnly: true
+      required:
+      - access
+      - refresh
+    Transaction:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        category:
+          type: string
+          format: uuid
+          nullable: true
+        expectation:
+          type: string
+          format: uuid
+          nullable: true
+        name:
+          type: string
+          maxLength: 100
+        description:
+          type: string
+          nullable: true
+        date:
+          type: string
+          format: date-time
+        status:
+          $ref: '#/components/schemas/Status594Enum'
+        amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,13}(?:\.\d{0,2})?$
+        currency:
+          type: string
+          maxLength: 10
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+        party:
+          type: string
+          format: uuid
+          nullable: true
+        supplier_offer:
+          type: string
+          format: uuid
+          nullable: true
+        purchase_order:
+          type: string
+          format: uuid
+          nullable: true
+        expectations:
+          type: string
+          format: uuid
+          nullable: true
+      required:
+      - amount
+      - created_at
+      - id
+      - name
+      - updated_at
+    TransactionSimple:
+      type: object
+      description: A lightweight serializer for nested transaction listing under Expectation
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        name:
+          type: string
+          maxLength: 100
+        amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,13}(?:\.\d{0,2})?$
+        currency:
+          type: string
+          maxLength: 10
+        status:
+          $ref: '#/components/schemas/Status594Enum'
+        date:
+          type: string
+          format: date-time
+      required:
+      - amount
+      - id
+      - name
+    UserCreateNested:
+      type: object
+      properties:
+        username:
+          type: string
+          description: Required. 150 characters or fewer. Letters, digits and @/./+/-/_
+            only.
+          pattern: ^[\w.@+-]+$
+          maxLength: 150
+        email:
+          type: string
+          format: email
+          title: Email address
+          maxLength: 254
+        first_name:
+          type: string
+          maxLength: 150
+        last_name:
+          type: string
+          maxLength: 150
+      required:
+      - email
+      - username
+    UserSummary:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        username:
+          type: string
+          description: Required. 150 characters or fewer. Letters, digits and @/./+/-/_
+            only.
+          pattern: ^[\w.@+-]+$
+          maxLength: 150
+        email:
+          type: string
+          format: email
+          title: Email address
+          maxLength: 254
+        first_name:
+          type: string
+          maxLength: 150
+        last_name:
+          type: string
+          maxLength: 150
+        is_active:
+          type: boolean
+          title: Active
+          description: Designates whether this user should be treated as active. Unselect
+            this instead of deleting accounts.
+        is_staff:
+          type: boolean
+          title: Staff status
+          description: Designates whether the user can log into this admin site.
+        roles:
+          type: array
+          items:
+            $ref: '#/components/schemas/RoleSummary'
+          readOnly: true
+      required:
+      - email
+      - id
+      - roles
+      - username
+    UserWrite:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        username:
+          type: string
+          description: Required. 150 characters or fewer. Letters, digits and @/./+/-/_
+            only.
+          pattern: ^[\w.@+-]+$
+          maxLength: 150
+        email:
+          type: string
+          format: email
+          title: Email address
+          maxLength: 254
+        first_name:
+          type: string
+          maxLength: 150
+        last_name:
+          type: string
+          maxLength: 150
+        is_active:
+          type: boolean
+          title: Active
+          description: Designates whether this user should be treated as active. Unselect
+            this instead of deleting accounts.
+        is_staff:
+          type: boolean
+          title: Staff status
+          description: Designates whether the user can log into this admin site.
+        roles:
+          type: array
+          items:
+            type: integer
+      required:
+      - email
+      - id
+      - username
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: sessionid
+    jwtAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    tokenAuth:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: Token-based authentication with required prefix "Token"
