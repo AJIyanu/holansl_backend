@@ -1,5 +1,7 @@
 from django.contrib.auth.models import Permission
+from django.db.models import Prefetch, Q
 from django.http import HttpResponse, JsonResponse
+from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.exceptions import PermissionDenied
@@ -15,13 +17,21 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.views import TokenObtainPairView
 
 from .audit_services import (
-    calculate_audit_summary,
-    calculate_login_summary,
-    generate_ai_security_insight,
-    generate_audit_ai_insight,
+    get_cached_audit_ai_insight,
+    get_cached_audit_summary,
+    get_cached_login_ai_insight,
+    get_cached_login_summary,
 )
-from .models import AuditLog, Department, Role, StaffProfile, User
+from .models import (
+    AuditLog,
+    Department,
+    DepartmentLeadership,
+    Role,
+    StaffProfile,
+    User,
+)
 from .permissions import (
+    CanManageDepartmentLeadership,
     CanViewAuditLogs,
     IsSecurityExecutive,
     can_manage_staff_security,
@@ -29,6 +39,8 @@ from .permissions import (
 from .serializers import (
     AuditLogSerializer,
     CurrentUserSerializer,
+    DepartmentLeadershipReadSerializer,
+    DepartmentLeadershipWriteSerializer,
     DepartmentSerializer,
     ForgotPasswordSerializer,
     HolanTokenObtainPairSerializer,
@@ -40,12 +52,6 @@ from .serializers import (
     StaffProfileWriteSerializer,
     UserSummarySerializer,
     UserWriteSerializer,
-)
-from .audit_services import (
-    get_cached_audit_ai_insight,
-    get_cached_audit_summary,
-    get_cached_login_ai_insight,
-    get_cached_login_summary,
 )
 
 
@@ -201,7 +207,13 @@ class ForgotPasswordView(APIView):
 
 class StaffProfileViewSet(viewsets.ModelViewSet):
     queryset = (
-        StaffProfile.objects.select_related("user", "department")
+        StaffProfile.objects.select_related(
+            "user",
+            "department",
+            "reports_to",
+            "reports_to__user",
+            "reports_to__department",
+        )
         .prefetch_related("user__groups")
         .all()
     )
@@ -215,6 +227,7 @@ class StaffProfileViewSet(viewsets.ModelViewSet):
         "job_title",
         "employment_type",
         "department",
+        "reports_to",
         "user__is_active",
         "user__is_staff",
         "user__groups",
@@ -230,6 +243,10 @@ class StaffProfileViewSet(viewsets.ModelViewSet):
         "user__last_name",
         "department__name",
         "user__groups__name",
+        "reports_to__employee_id",
+        "reports_to__user__username",
+        "reports_to__user__first_name",
+        "reports_to__user__last_name",
     ]
 
     ordering_fields = [
@@ -257,6 +274,7 @@ class StaffProfileViewSet(viewsets.ModelViewSet):
     def partial_update(self, request, *args, **kwargs):
         privileged_fields = {
             "department",
+            "reports_to",
             "is_active",
             "is_staff",
             "roles",
@@ -285,13 +303,114 @@ class StaffProfileViewSet(viewsets.ModelViewSet):
 class DepartmentViewSet(viewsets.ModelViewSet):
     """API endpoint for departments."""
 
-    queryset = Department.objects.all()
-    serializer_class = DepartmentSerializer
-    permission_classes = [IsAdminUser, DjangoModelPermissions]
+    today = timezone.localdate()
 
-    # --- Filtering, Search, and Ordering ---
+    active_leadership_queryset = (
+        DepartmentLeadership.objects.select_related(
+            "manager__user",
+            "manager__department",
+            "created_by",
+        )
+        .filter(active_from__lte=today)
+        .filter(Q(active_until__isnull=True) | Q(active_until__gte=today))
+        .order_by(
+            "-is_primary",
+            "manager__user__first_name",
+            "manager__user__last_name",
+        )
+    )
+
+    queryset = Department.objects.prefetch_related(
+        Prefetch(
+            "leadership_assignments",
+            queryset=active_leadership_queryset,
+            to_attr="active_leaderships",
+        )
+    )
+
+    serializer_class = DepartmentSerializer
+
+    permission_classes = [
+        IsAdminUser,
+        DjangoModelPermissions,
+    ]
+
     search_fields = ["name", "code"]
     ordering_fields = ["name"]
+
+
+class DepartmentLeadershipViewSet(viewsets.ModelViewSet):
+    queryset = DepartmentLeadership.objects.select_related(
+        "department",
+        "manager",
+        "manager__user",
+        "manager__department",
+        "created_by",
+    ).all()
+
+    permission_classes = [
+        IsAuthenticated,
+        CanManageDepartmentLeadership,
+    ]
+
+    filterset_fields = [
+        "department",
+        "manager",
+        "leadership_type",
+        "is_primary",
+        "active_from",
+        "active_until",
+    ]
+
+    search_fields = [
+        "department__name",
+        "department__code",
+        "manager__employee_id",
+        "manager__user__username",
+        "manager__user__email",
+        "manager__user__first_name",
+        "manager__user__last_name",
+        "manager__job_title",
+    ]
+
+    ordering_fields = [
+        "active_from",
+        "active_until",
+        "created_at",
+        "updated_at",
+        "department__name",
+        "manager__user__first_name",
+        "manager__user__last_name",
+    ]
+
+    ordering = [
+        "department__name",
+        "-is_primary",
+        "manager__user__first_name",
+    ]
+
+    def get_serializer_class(self):
+        if self.action in ("list", "retrieve"):
+            return DepartmentLeadershipReadSerializer
+
+        return DepartmentLeadershipWriteSerializer
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user)
+
+    def destroy(self, request, *args, **kwargs):
+        if not request.user.is_superuser:
+            raise PermissionDenied(
+                "Only a superuser can permanently delete "
+                "a department leadership record. Use PATCH "
+                "to set active_until instead."
+            )
+
+        return super().destroy(
+            request,
+            *args,
+            **kwargs,
+        )
 
 
 class RoleViewSet(viewsets.ModelViewSet):

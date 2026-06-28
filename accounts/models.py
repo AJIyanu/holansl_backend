@@ -1,6 +1,10 @@
 import uuid
-from django.db import models
+
 from django.contrib.auth.models import AbstractUser, Group
+from django.core.exceptions import ValidationError
+from django.db import models
+from django.db.models import F, Q
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 # =============================================================================
@@ -93,6 +97,15 @@ class StaffProfile(models.Model):
         related_name="staff_members",
     )
 
+    reports_to = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="direct_reports",
+        help_text="The staff member's immediate reporting manager.",
+    )
+
     employee_id = models.CharField(
         max_length=20, unique=True, blank=True, editable=False
     )
@@ -118,6 +131,60 @@ class StaffProfile(models.Model):
     def __str__(self):
         return self.user.get_full_name() or self.user.username
 
+    def clean(self):
+        super().clean()
+
+        if not self.reports_to_id:
+            return
+
+        if self.pk and self.reports_to_id == self.pk:
+            raise ValidationError(
+                {"reports_to": ("A staff member cannot report to themselves.")}
+            )
+
+        manager = self.reports_to
+
+        if not manager.user.is_active:
+            raise ValidationError(
+                {"reports_to": ("The selected reporting manager is inactive.")}
+            )
+
+        if manager.end_date and manager.end_date < timezone.localdate():
+            raise ValidationError(
+                {
+                    "reports_to": (
+                        "The selected reporting manager's employment has ended."
+                    )
+                }
+            )
+
+        visited_profile_ids = set()
+        current_profile = manager
+
+        while current_profile is not None:
+            if self.pk and current_profile.pk == self.pk:
+                raise ValidationError(
+                    {
+                        "reports_to": (
+                            "This reporting relationship would "
+                            "create a circular hierarchy."
+                        )
+                    }
+                )
+
+            if current_profile.pk in visited_profile_ids:
+                raise ValidationError(
+                    {
+                        "reports_to": (
+                            "The selected reporting chain already "
+                            "contains a circular relationship."
+                        )
+                    }
+                )
+
+            visited_profile_ids.add(current_profile.pk)
+            current_profile = current_profile.reports_to
+
     def save(self, *args, **kwargs):
         """
         Overrides the save method to auto-generate the employee_id
@@ -133,6 +200,202 @@ class StaffProfile(models.Model):
             self.employee_id = f"HOL-{self.department.code.upper()}-{next_serial:03d}"
 
         super().save(*args, **kwargs)
+
+
+class DepartmentLeadership(models.Model):
+    """
+    Assigns one or more authorised leaders to a department.
+
+    This is separate from StaffProfile.reports_to because a reporting
+    manager and a department manager are not always the same person.
+    """
+
+    class LeadershipType(models.TextChoices):
+        MANAGER = "MANAGER", _("Manager")
+        DEPUTY = "DEPUTY", _("Deputy Manager")
+
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+    )
+
+    department = models.ForeignKey(
+        Department,
+        on_delete=models.CASCADE,
+        related_name="leadership_assignments",
+    )
+
+    manager = models.ForeignKey(
+        StaffProfile,
+        on_delete=models.PROTECT,
+        related_name="department_leaderships",
+    )
+
+    leadership_type = models.CharField(
+        max_length=20,
+        choices=LeadershipType.choices,
+        default=LeadershipType.MANAGER,
+    )
+
+    is_primary = models.BooleanField(
+        default=False,
+        help_text=("Identifies the principal leader for the department."),
+    )
+
+    active_from = models.DateField(
+        default=timezone.localdate,
+    )
+
+    active_until = models.DateField(
+        null=True,
+        blank=True,
+    )
+
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="created_department_leaderships",
+    )
+
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+    )
+
+    updated_at = models.DateTimeField(
+        auto_now=True,
+    )
+
+    class Meta:
+        verbose_name = _("Department Leadership")
+        verbose_name_plural = _("Department Leadership")
+
+        ordering = [
+            "department__name",
+            "-is_primary",
+            "manager__user__first_name",
+        ]
+
+        permissions = [
+            (
+                "manage_departmentleadership",
+                "Can manage department leadership",
+            ),
+        ]
+
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    Q(active_until__isnull=True) | Q(active_until__gte=F("active_from"))
+                ),
+                name="acct_leadership_dates_valid",
+            ),
+            models.UniqueConstraint(
+                fields=[
+                    "department",
+                    "manager",
+                    "leadership_type",
+                    "active_from",
+                ],
+                name="acct_unique_leadership_term",
+            ),
+            models.UniqueConstraint(
+                fields=["department"],
+                condition=Q(
+                    is_primary=True,
+                    active_until__isnull=True,
+                ),
+                name="acct_one_open_primary_lead",
+            ),
+        ]
+
+    def __str__(self):
+        return (
+            f"{self.manager} - {self.department} ({self.get_leadership_type_display()})"
+        )
+
+    @property
+    def is_active(self):
+        today = timezone.localdate()
+
+        return bool(
+            self.manager.user.is_active
+            and self.active_from <= today
+            and (self.active_until is None or self.active_until >= today)
+        )
+
+    def clean(self):
+        super().clean()
+
+        if self.active_until and self.active_until < self.active_from:
+            raise ValidationError(
+                {"active_until": ("The end date cannot be before the start date.")}
+            )
+
+        if not self.manager_id:
+            return
+
+        if not self.manager.user.is_active and (
+            self.active_until is None or self.active_until >= timezone.localdate()
+        ):
+            raise ValidationError(
+                {
+                    "manager": (
+                        "An inactive staff member cannot be "
+                        "assigned as an active department leader."
+                    )
+                }
+            )
+
+        if self.active_from < self.manager.start_date:
+            raise ValidationError(
+                {
+                    "active_from": (
+                        "The leadership start date cannot be "
+                        "before the manager's employment start date."
+                    )
+                }
+            )
+
+        if self.manager.end_date and self.active_from > self.manager.end_date:
+            raise ValidationError(
+                {
+                    "active_from": (
+                        "The leadership start date cannot be after "
+                        "the manager's employment end date."
+                    )
+                }
+            )
+
+        if self.is_primary and self.department_id:
+            overlapping_primary = DepartmentLeadership.objects.filter(
+                department_id=self.department_id,
+                is_primary=True,
+            )
+
+            if self.pk:
+                overlapping_primary = overlapping_primary.exclude(pk=self.pk)
+
+            if self.active_until:
+                overlapping_primary = overlapping_primary.filter(
+                    active_from__lte=self.active_until
+                )
+
+            overlapping_primary = overlapping_primary.filter(
+                Q(active_until__isnull=True) | Q(active_until__gte=self.active_from)
+            )
+
+            if overlapping_primary.exists():
+                raise ValidationError(
+                    {
+                        "is_primary": (
+                            "This department already has a "
+                            "primary leader during the selected period."
+                        )
+                    }
+                )
 
 
 # =============================================================================

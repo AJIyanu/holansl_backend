@@ -38,14 +38,35 @@ ROLE_PERMISSION_RULES = {
     "CEO": {
         "apps": ["accounts", "crm", "procurement", "ledger"],
         "actions": ["add", "change", "view", "delete"],
+        "extra_codenames": [
+            "dispatch_notification",
+            "view_all_notification",
+            "manage_notificationtemplate",
+            "retry_notificationdelivery",
+            "manage_departmentleadership",
+        ],
     },
     "CTO": {
         "apps": ["accounts", "crm", "procurement", "ledger"],
         "actions": ["add", "change", "view", "delete"],
+        "extra_codenames": [
+            "dispatch_notification",
+            "view_all_notification",
+            "manage_notificationtemplate",
+            "retry_notificationdelivery",
+            "manage_departmentleadership",
+        ],
     },
     "Super Admin": {
         "apps": ["accounts", "crm", "procurement", "ledger"],
         "actions": ["add", "change", "view", "delete"],
+        "extra_codenames": [
+            "dispatch_notification",
+            "view_all_notification",
+            "manage_notificationtemplate",
+            "retry_notificationdelivery",
+            "manage_departmentleadership",
+        ],
     },
     "Manager": {
         "apps": ["crm", "procurement", "ledger"],

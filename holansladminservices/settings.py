@@ -97,7 +97,15 @@ DATABASES = {
     "default": dj_database_url.config(
         default="sqlite:///db.sqlite3",  # Fallback for local development
         conn_max_age=600,
-    )
+    ),
+    "test": {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": "holan_test",
+        "USER": "Holan",
+        "PASSWORD": "HolanTestDB",
+        "HOST": "localhost",
+        "PORT": "5432",
+    },
 }
 
 

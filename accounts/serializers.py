@@ -5,6 +5,16 @@ from rest_framework.exceptions import AuthenticationFailed, ValidationError
 from django.contrib.auth import get_user_model
 
 from .models import User, StaffProfile, Department, Role, AuditLog, PasswordResetCode
+from .models import (
+    AuditLog,
+    Department,
+    DepartmentLeadership,
+    PasswordResetCode,
+    Role,
+    StaffProfile,
+    User,
+)
+from django.db.models import Q
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
@@ -26,6 +36,7 @@ DJANGO_ACTION_MAP = {
     "view": "view",
 }
 
+
 def format_permission(permission: Permission) -> str:
     """
     Convert Django permission format:
@@ -45,6 +56,7 @@ def format_permission(permission: Permission) -> str:
     action = DJANGO_ACTION_MAP.get(django_action, django_action)
 
     return f"{app_label}.{resource}.{action}"
+
 
 def get_client_ip(request):
     if not request:
@@ -149,9 +161,7 @@ class HolanTokenObtainPairSerializer(TokenObtainPairSerializer):
                 request=request,
                 metadata={
                     "reason": "Resend failed to accept the email.",
-                    "purpose": (
-                        PasswordResetCode.Purpose.DEFAULT_PASSWORD_CHANGE
-                    ),
+                    "purpose": (PasswordResetCode.Purpose.DEFAULT_PASSWORD_CHANGE),
                 },
             )
 
@@ -194,6 +204,7 @@ class HolanTokenObtainPairSerializer(TokenObtainPairSerializer):
             },
         )
 
+
 class RoleSummarySerializer(serializers.ModelSerializer):
     class Meta:
         model = Role
@@ -227,12 +238,33 @@ class UserSummarySerializer(serializers.ModelSerializer):
         )
 
 
-class StaffProfileReadSerializer(serializers.ModelSerializer):
+class ReportingStaffSummarySerializer(serializers.ModelSerializer):
     user = UserSummarySerializer(read_only=True)
+
     department = DepartmentSummarySerializer(read_only=True)
 
     class Meta:
         model = StaffProfile
+
+        fields = (
+            "id",
+            "employee_id",
+            "job_title",
+            "department",
+            "user",
+        )
+
+
+class StaffProfileReadSerializer(serializers.ModelSerializer):
+    user = UserSummarySerializer(read_only=True)
+
+    department = DepartmentSummarySerializer(read_only=True)
+
+    reports_to = ReportingStaffSummarySerializer(read_only=True)
+
+    class Meta:
+        model = StaffProfile
+
         fields = (
             "id",
             "employee_id",
@@ -247,6 +279,7 @@ class StaffProfileReadSerializer(serializers.ModelSerializer):
             "date_of_birth",
             "nationality",
             "department",
+            "reports_to",
             "user",
         )
 
@@ -290,6 +323,7 @@ class UserWriteSerializer(serializers.ModelSerializer):
             instance.groups.set(roles)
 
         return instance
+
 
 class PasswordResetVerifySerializer(serializers.Serializer):
     code = serializers.CharField(write_only=True)
@@ -407,6 +441,7 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
 
         return user
 
+
 class ForgotPasswordSerializer(serializers.Serializer):
     email = serializers.EmailField(write_only=True)
 
@@ -509,27 +544,33 @@ class ForgotPasswordSerializer(serializers.Serializer):
 
         return user
 
+
 class UserSerializer(serializers.ModelSerializer):
     """
     Updated serializer for the User model to allow assigning roles.
     """
+
     # profile = StaffProfileSerializer(read_only=True)
     roles = serializers.PrimaryKeyRelatedField(
-        many=True,
-        queryset=Role.objects.all(),
-        source='groups' 
+        many=True, queryset=Role.objects.all(), source="groups"
     )
 
     class Meta:
         model = User
         fields = (
-            'id', 'username', 'email', 'first_name', 'last_name', 
-            'password', 'profile', 'roles'
+            "id",
+            "username",
+            "email",
+            "first_name",
+            "last_name",
+            "password",
+            "profile",
+            "roles",
         )
         extra_kwargs = {
-            'password': {'write_only': True, 'style': {'input_type': 'password'}}
+            "password": {"write_only": True, "style": {"input_type": "password"}}
         }
-    
+
     def create(self, validated_data):
         request = self.context.get("request")
         roles = validated_data.pop("groups", [])
@@ -561,24 +602,26 @@ class UserSerializer(serializers.ModelSerializer):
         )
 
         return user
-    
+
     def update(self, instance, validated_data):
         """
         Custom update method to handle password hashing.
         """
-        if 'password' in validated_data:
-            password = validated_data.pop('password')
+        if "password" in validated_data:
+            password = validated_data.pop("password")
             instance.set_password(password)
-        
+
         return super().update(instance, validated_data)
-    
+
+
 class UserCreateNestedSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ('username', 'email', 'first_name', 'last_name')
+        fields = ("username", "email", "first_name", "last_name")
         extra_kwargs = {
-            'password': {'write_only': True, 'style': {'input_type': 'password'}}
+            "password": {"write_only": True, "style": {"input_type": "password"}}
         }
+
 
 class StaffProfileWriteSerializer(serializers.ModelSerializer):
     user = UserCreateNestedSerializer(write_only=True, required=False)
@@ -606,6 +649,15 @@ class StaffProfileWriteSerializer(serializers.ModelSerializer):
         allow_null=True,
     )
 
+    reports_to = serializers.PrimaryKeyRelatedField(
+        queryset=StaffProfile.objects.select_related(
+            "user",
+            "department",
+        ),
+        required=False,
+        allow_null=True,
+    )
+
     class Meta:
         model = StaffProfile
         fields = (
@@ -623,6 +675,7 @@ class StaffProfileWriteSerializer(serializers.ModelSerializer):
             "date_of_birth",
             "nationality",
             "department",
+            "reports_to",
             "roles",
             "is_active",
             "is_staff",
@@ -642,6 +695,73 @@ class StaffProfileWriteSerializer(serializers.ModelSerializer):
 
         return super().to_internal_value(mutable_data)
 
+    def validate_reports_to(self, reports_to):
+        if reports_to is None:
+            return None
+
+        if self.instance and reports_to.pk == self.instance.pk:
+            raise serializers.ValidationError(
+                "A staff member cannot report to themselves."
+            )
+
+        if not reports_to.user.is_active:
+            raise serializers.ValidationError(
+                "The selected reporting manager is inactive."
+            )
+
+        if reports_to.end_date and reports_to.end_date < timezone.localdate():
+            raise serializers.ValidationError(
+                "The selected reporting manager's employment has ended."
+            )
+
+        return reports_to
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+
+        reports_to = attrs.get(
+            "reports_to",
+            (self.instance.reports_to if self.instance else None),
+        )
+
+        if reports_to is None:
+            return attrs
+
+        visited_profile_ids = set()
+        current_profile = reports_to
+
+        while current_profile is not None:
+            if self.instance and current_profile.pk == self.instance.pk:
+                raise serializers.ValidationError(
+                    {
+                        "reports_to": (
+                            "This reporting relationship would "
+                            "create a circular hierarchy."
+                        )
+                    }
+                )
+
+            if current_profile.pk in visited_profile_ids:
+                raise serializers.ValidationError(
+                    {
+                        "reports_to": (
+                            "The selected reporting chain already "
+                            "contains a circular relationship."
+                        )
+                    }
+                )
+
+            visited_profile_ids.add(current_profile.pk)
+            current_profile = current_profile.reports_to
+
+        return attrs
+
+    def to_representation(self, instance):
+        return StaffProfileReadSerializer(
+            instance,
+            context=self.context,
+        ).data
+
     def create(self, validated_data):
         request = self.context.get("request")
 
@@ -651,9 +771,7 @@ class StaffProfileWriteSerializer(serializers.ModelSerializer):
         validated_data.pop("is_staff", None)
 
         if not user_data:
-            raise serializers.ValidationError(
-                {"user": "User details are required."}
-            )
+            raise serializers.ValidationError({"user": "User details are required."})
 
         user = User.objects.create_user(
             **user_data,
@@ -674,11 +792,7 @@ class StaffProfileWriteSerializer(serializers.ModelSerializer):
         )
 
         create_audit_log(
-            user=(
-                request.user
-                if request and request.user.is_authenticated
-                else None
-            ),
+            user=(request.user if request and request.user.is_authenticated else None),
             target_user=user,
             event_category=AuditLog.EventCategory.SECURITY,
             event_type=AuditLog.EventType.ACCOUNT_CREATED,
@@ -690,13 +804,9 @@ class StaffProfileWriteSerializer(serializers.ModelSerializer):
                 "created_email": user.email,
                 "profile_id": str(profile.id),
                 "department_id": (
-                    str(profile.department_id)
-                    if profile.department_id
-                    else None
+                    str(profile.department_id) if profile.department_id else None
                 ),
-                "roles": list(
-                    user.groups.values_list("name", flat=True)
-                ),
+                "roles": list(user.groups.values_list("name", flat=True)),
             },
         )
 
@@ -723,44 +833,285 @@ class StaffProfileWriteSerializer(serializers.ModelSerializer):
             user_changed = True
 
         if user_changed:
-            instance.user.save(
-                update_fields=["is_active", "is_staff"]
-            )
+            instance.user.save(update_fields=["is_active", "is_staff"])
 
         if roles is not None:
             instance.user.groups.set(roles)
 
         return instance
 
-UserSerializer.profile = StaffProfileWriteSerializer(read_only=True, source='profile')
+
+UserSerializer.profile = StaffProfileWriteSerializer(read_only=True, source="profile")
+
+
+class DepartmentLeadershipReadSerializer(serializers.ModelSerializer):
+    department = DepartmentSummarySerializer(read_only=True)
+
+    manager = ReportingStaffSummarySerializer(read_only=True)
+
+    created_by = UserSummarySerializer(read_only=True)
+
+    is_active = serializers.BooleanField(read_only=True)
+
+    class Meta:
+        model = DepartmentLeadership
+
+        fields = (
+            "id",
+            "department",
+            "manager",
+            "leadership_type",
+            "is_primary",
+            "active_from",
+            "active_until",
+            "is_active",
+            "created_by",
+            "created_at",
+            "updated_at",
+        )
+
+
+class DepartmentLeadershipWriteSerializer(serializers.ModelSerializer):
+    department = serializers.PrimaryKeyRelatedField(queryset=Department.objects.all())
+
+    manager = serializers.PrimaryKeyRelatedField(
+        queryset=StaffProfile.objects.select_related(
+            "user",
+            "department",
+        )
+    )
+
+    class Meta:
+        model = DepartmentLeadership
+
+        fields = (
+            "id",
+            "department",
+            "manager",
+            "leadership_type",
+            "is_primary",
+            "active_from",
+            "active_until",
+        )
+
+        read_only_fields = ("id",)
+
+    def validate_manager(self, manager):
+        if not manager.user.is_active:
+            raise serializers.ValidationError(
+                "An inactive staff member cannot be assigned as a department leader."
+            )
+
+        return manager
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+
+        department = attrs.get(
+            "department",
+            (self.instance.department if self.instance else None),
+        )
+
+        manager = attrs.get(
+            "manager",
+            (self.instance.manager if self.instance else None),
+        )
+
+        leadership_type = attrs.get(
+            "leadership_type",
+            (
+                self.instance.leadership_type
+                if self.instance
+                else DepartmentLeadership.LeadershipType.MANAGER
+            ),
+        )
+
+        is_primary = attrs.get(
+            "is_primary",
+            (self.instance.is_primary if self.instance else False),
+        )
+
+        active_from = attrs.get(
+            "active_from",
+            (self.instance.active_from if self.instance else timezone.localdate()),
+        )
+
+        active_until = attrs.get(
+            "active_until",
+            (self.instance.active_until if self.instance else None),
+        )
+
+        if active_until and active_until < active_from:
+            raise serializers.ValidationError(
+                {"active_until": ("The end date cannot be before the start date.")}
+            )
+
+        if manager:
+            if active_from < manager.start_date:
+                raise serializers.ValidationError(
+                    {
+                        "active_from": (
+                            "Leadership cannot begin before "
+                            "the manager's employment start date."
+                        )
+                    }
+                )
+
+            if manager.end_date and active_from > manager.end_date:
+                raise serializers.ValidationError(
+                    {
+                        "active_from": (
+                            "Leadership cannot begin after "
+                            "the manager's employment end date."
+                        )
+                    }
+                )
+
+        if is_primary and department:
+            overlapping_primary = DepartmentLeadership.objects.filter(
+                department=department,
+                is_primary=True,
+            )
+
+            if self.instance:
+                overlapping_primary = overlapping_primary.exclude(pk=self.instance.pk)
+
+            if active_until:
+                overlapping_primary = overlapping_primary.filter(
+                    active_from__lte=active_until
+                )
+
+            overlapping_primary = overlapping_primary.filter(
+                Q(active_until__isnull=True) | Q(active_until__gte=active_from)
+            )
+
+            if overlapping_primary.exists():
+                raise serializers.ValidationError(
+                    {
+                        "is_primary": (
+                            "This department already has a "
+                            "primary leader during that period."
+                        )
+                    }
+                )
+
+        duplicate_term = DepartmentLeadership.objects.filter(
+            department=department,
+            manager=manager,
+            leadership_type=leadership_type,
+            active_from=active_from,
+        )
+
+        if self.instance:
+            duplicate_term = duplicate_term.exclude(pk=self.instance.pk)
+
+        if duplicate_term.exists():
+            raise serializers.ValidationError(
+                "This department leadership assignment already exists."
+            )
+
+        return attrs
+
+    def to_representation(self, instance):
+        return DepartmentLeadershipReadSerializer(
+            instance,
+            context=self.context,
+        ).data
+
 
 class DepartmentSerializer(serializers.ModelSerializer):
+    leaders = serializers.SerializerMethodField()
+
     class Meta:
         model = Department
-        fields = '__all__'
+
+        fields = (
+            "id",
+            "name",
+            "code",
+            "description",
+            "leaders",
+        )
+
+        read_only_fields = ("leaders",)
+
+    def get_leaders(self, department):
+        prefetched_leaders = getattr(
+            department,
+            "active_leaderships",
+            None,
+        )
+
+        if prefetched_leaders is None:
+            today = timezone.localdate()
+
+            prefetched_leaders = (
+                department.leadership_assignments.select_related(
+                    "manager__user",
+                    "manager__department",
+                    "created_by",
+                )
+                .filter(active_from__lte=today)
+                .filter(Q(active_until__isnull=True) | Q(active_until__gte=today))
+            )
+
+        return DepartmentLeadershipReadSerializer(
+            prefetched_leaders,
+            many=True,
+            context=self.context,
+        ).data
+
 
 class PermissionSerializer(serializers.ModelSerializer):
     class Meta:
         model = Permission
-        fields = ('id', 'name', 'codename')
+        fields = ("id", "name", "codename")
+
 
 class RoleSerializer(serializers.ModelSerializer):
     """
     Updated serializer for the Role model to allow assigning permissions.
     """
+
     permissions = serializers.PrimaryKeyRelatedField(
-        many=True,
-        queryset=Permission.objects.all()
+        many=True, queryset=Permission.objects.all()
     )
-    
+
     class Meta:
         model = Role
-        fields = ('id', 'name', 'permissions')
+        fields = ("id", "name", "permissions")
+
+
+class CurrentUserStaffProfileSerializer(serializers.ModelSerializer):
+    department = DepartmentSummarySerializer(read_only=True)
+
+    reports_to = ReportingStaffSummarySerializer(read_only=True)
+
+    class Meta:
+        model = StaffProfile
+
+        fields = (
+            "id",
+            "employee_id",
+            "job_title",
+            "employment_type",
+            "start_date",
+            "end_date",
+            "phone_number",
+            "address",
+            "middle_name",
+            "sex",
+            "date_of_birth",
+            "nationality",
+            "department",
+            "reports_to",
+        )
+
 
 class CurrentUserSerializer(serializers.ModelSerializer):
     roles = serializers.SerializerMethodField()
     permissions = serializers.SerializerMethodField()
-    profile = StaffProfileWriteSerializer(read_only=True)
+    profile = CurrentUserStaffProfileSerializer(read_only=True)
 
     class Meta:
         model = User

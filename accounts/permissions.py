@@ -1,5 +1,5 @@
 from django.conf import settings
-from rest_framework.permissions import BasePermission
+from rest_framework.permissions import SAFE_METHODS, BasePermission
 
 
 def can_manage_staff_security(user):
@@ -44,3 +44,27 @@ class IsSecurityExecutive(BasePermission):
 
     def has_permission(self, request, view):
         return can_manage_staff_security(request.user)
+
+
+class CanManageDepartmentLeadership(BasePermission):
+    message = "You do not have permission to manage department leadership."
+
+    def has_permission(self, request, view):
+        user = request.user
+
+        if not user or not user.is_authenticated:
+            return False
+
+        if user.is_superuser:
+            return True
+
+        if request.method in SAFE_METHODS:
+            return bool(
+                can_manage_staff_security(user)
+                or user.has_perm("accounts.view_departmentleadership")
+            )
+
+        return bool(
+            can_manage_staff_security(user)
+            or user.has_perm("accounts.manage_departmentleadership")
+        )
