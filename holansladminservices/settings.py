@@ -53,6 +53,7 @@ INSTALLED_APPS = [
     "django_filters",
     "accounts",
     "notifications.apps.NotificationsConfig",
+    "tasks.apps.TasksConfig",
     "drf_spectacular",
 ]
 
@@ -422,3 +423,93 @@ NOTIFICATION_WORKER_NAME = os.getenv(
     "NOTIFICATION_WORKER_NAME",
     "",
 )
+
+
+# --------------------------------------------------------
+# TASK MANAGEMENT
+# --------------------------------------------------------
+
+TASK_ASSIGNMENT_NOTIFICATIONS_ENABLED = os.getenv(
+    "TASK_ASSIGNMENT_NOTIFICATIONS_ENABLED",
+    "True",
+).strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+
+TASK_ASSIGNMENT_NOTIFICATION_CHANNELS = [
+    channel.strip().upper()
+    for channel in os.getenv(
+        "TASK_ASSIGNMENT_NOTIFICATION_CHANNELS",
+        "DASHBOARD,EMAIL",
+    ).split(",")
+    if channel.strip()
+]
+
+# SHARED creates one event with several recipient records.
+# INDIVIDUAL creates one notification event per recipient.
+TASK_ASSIGNMENT_NOTIFICATION_EVENT_MODE = (
+    os.getenv(
+        "TASK_ASSIGNMENT_NOTIFICATION_EVENT_MODE",
+        "SHARED",
+    )
+    .strip()
+    .upper()
+)
+
+TASK_ASSIGNMENT_NOTIFICATION_ACTION_URL = os.getenv(
+    "TASK_ASSIGNMENT_NOTIFICATION_ACTION_URL",
+    "/dashboard/tasks",
+).strip()
+
+TASK_LIFECYCLE_NOTIFICATION_CHANNELS = [
+    channel.strip().upper()
+    for channel in os.getenv(
+        "TASK_LIFECYCLE_NOTIFICATION_CHANNELS",
+        "DASHBOARD",
+    ).split(",")
+    if channel.strip()
+]
+
+# --------------------------------------------------------
+# TASK REMINDERS
+# --------------------------------------------------------
+
+TASK_REMINDERS_ENABLED = os.getenv(
+    "TASK_REMINDERS_ENABLED",
+    "True",
+).strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+
+TASK_DASHBOARD_REMINDERS_ENABLED = os.getenv(
+    "TASK_DASHBOARD_REMINDERS_ENABLED",
+    "True",
+).strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+
+# Enable only when a cron job, background worker or external
+# scheduler regularly processes notification deliveries.
+TASK_SCHEDULED_EXTERNAL_DELIVERY_ENABLED = os.getenv(
+    "TASK_SCHEDULED_EXTERNAL_DELIVERY_ENABLED",
+    "False",
+).strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+
+TASK_REMINDER_NOTIFICATION_ACTION_URL = os.getenv(
+    "TASK_REMINDER_NOTIFICATION_ACTION_URL",
+    "/dashboard/tasks",
+).strip()

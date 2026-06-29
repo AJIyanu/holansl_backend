@@ -32,6 +32,7 @@ urlpatterns = [
     path("ledger/", include("ledger.urls")),
     path("account/", include("accounts.urls")),
     path("notifications/", include("notifications.urls")),
+    path("tasks/", include("tasks.urls")),
     path("api-auth/", include("rest_framework.urls")),
     path("token/", HolanTokenObtainPairView.as_view(), name="token_obtain_pair"),
     path("token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
