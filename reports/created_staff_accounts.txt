@@ -1,0 +1,49 @@
+====================================================================================================
+HOLANSL STAFF ACCOUNT CREATION REPORT
+Generated: 2026-07-03 21:16:41 UTC
+====================================================================================================
+
+New accounts created: 16
+Existing accounts skipped: 0
+
+SUCCESSFULLY CREATED ACCOUNTS
+----------------------------------------------------------------------------------------------------
+NAME                    EMAIL                         DEPARTMENT          JOB TITLE                   REPORTS TO
+----------------------------------------------------------------------------------------------------
+Daniel Adebayo          daniel@holansl.com            Management          Chief Executive Officer     None
+  Username: daniel | Employee ID: HOL-MGT-002 | Role(s): CEO
+Michael Okafor          michael@holansl.com           Technical           Technical Manager           Daniel Adebayo
+  Username: michael | Employee ID: HOL-TECH-001 | Role(s): Manager
+Samuel Adeyemi          samuel@holansl.com            Technical           Software Engineer           Michael Okafor
+  Username: samuel | Employee ID: HOL-TECH-002 | Role(s): Software Engineer
+David Eze               david@holansl.com             Technical           IT Technician               Michael Okafor
+  Username: david | Employee ID: HOL-TECH-003 | Role(s): IT Technician
+Grace Olawale           grace@holansl.com             Human Resource      Human Resource Manager      Daniel Adebayo
+  Username: grace | Employee ID: HOL-HR-001 | Role(s): Manager
+Esther Bello            esther@holansl.com            Human Resource      HR Officer                  Grace Olawale
+  Username: esther | Employee ID: HOL-HR-002 | Role(s): Human Resource
+Deborah Udo             deborah@holansl.com           Human Resource      HR Assistant                Grace Olawale
+  Username: deborah | Employee ID: HOL-HR-003 | Role(s): Human Resource
+Peter Ogunleye          peter@holansl.com             Account             Account Manager             Daniel Adebayo
+  Username: peter | Employee ID: HOL-ACC-001 | Role(s): Manager
+Joshua Ibrahim          joshua@holansl.com            Account             Account Officer             Peter Ogunleye
+  Username: joshua | Employee ID: HOL-ACC-002 | Role(s): Account Officer
+Ruth Onyeka             ruth@holansl.com              Account             Accounts Assistant          Peter Ogunleye
+  Username: ruth | Employee ID: HOL-ACC-003 | Role(s): Account Officer
+Victoria Balogun        victoria@holansl.com          Management          Administrative Manager      Daniel Adebayo
+  Username: victoria | Employee ID: HOL-MGT-003 | Role(s): Manager
+Nathan Akinola          nathan@holansl.com            Management          Administrative Officer      Victoria Balogun
+  Username: nathan | Employee ID: HOL-MGT-004 | Role(s): Viewer
+Faith Nwosu             faith@holansl.com             Management          Executive Assistant         Victoria Balogun
+  Username: faith | Employee ID: HOL-MGT-005 | Role(s): Viewer
+Andrew Ojo              andrew@holansl.com            Procurement         Procurement Manager         Daniel Adebayo
+  Username: andrew | Employee ID: HOL-HOLPR-001 | Role(s): Manager
+Mercy Abiola            mercy@holansl.com             Procurement         Procurement Officer         Andrew Ojo
+  Username: mercy | Employee ID: HOL-HOLPR-002 | Role(s): Procurement Officer
+Isaac Danladi           isaac@holansl.com             Procurement         Procurement Assistant       Andrew Ojo
+  Username: isaac | Employee ID: HOL-HOLPR-003 | Role(s): Procurement Officer
+
+
+SECURITY NOTE
+----------------------------------------------------------------------------------------------------
+New accounts use the configured default staff password and must change it through the email reset flow before normal authentication.

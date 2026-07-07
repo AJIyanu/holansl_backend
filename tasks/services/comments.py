@@ -61,7 +61,7 @@ def _lock_task(task):
 
     try:
         return (
-            Task.objects.select_for_update()
+            Task.objects.select_for_update(of=("self",))
             .select_related(
                 "batch",
                 "batch__created_by",
@@ -83,7 +83,7 @@ def _lock_comment(comment):
 
     try:
         return (
-            TaskComment.objects.select_for_update()
+            TaskComment.objects.select_for_update(of=("self",))
             .select_related(
                 "task",
                 "task__batch",

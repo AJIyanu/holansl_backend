@@ -17,15 +17,15 @@ router.register(
 )
 
 router.register(
-    r"",
-    TaskViewSet,
-    basename="task",
-)
-
-router.register(
     r"reminders",
     TaskReminderViewSet,
     basename="task-reminder",
+)
+
+router.register(
+    r"",
+    TaskViewSet,
+    basename="task",
 )
 
 

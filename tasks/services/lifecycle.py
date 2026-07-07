@@ -81,7 +81,7 @@ def _lock_task(task):
 
     try:
         return (
-            Task.objects.select_for_update()
+            Task.objects.select_for_update(of=("self",))
             .select_related(
                 "batch",
                 "batch__created_by",
@@ -99,7 +99,7 @@ def _lock_batch(batch):
 
     try:
         return (
-            TaskBatch.objects.select_for_update()
+            TaskBatch.objects.select_for_update(of=("self",))
             .select_related(
                 "created_by",
                 "source_department",
@@ -503,7 +503,7 @@ def cancel_task_batch(
         raise ValidationError("This task assignment is already cancelled.")
 
     tasks = list(
-        locked_batch.tasks.select_for_update().select_related(
+        locked_batch.tasks.select_for_update(of=("self",)).select_related(
             "assigned_to",
             "batch",
         )
@@ -762,7 +762,7 @@ def archive_task_batch(
         raise ValidationError("This task assignment is already archived.")
 
     tasks = list(
-        locked_batch.tasks.select_for_update().select_related(
+        locked_batch.tasks.select_for_update(of=("self",)).select_related(
             "assigned_to",
             "batch",
         )
@@ -873,7 +873,7 @@ def restore_task_batch(
     original_archive_time = locked_batch.archived_at
 
     tasks_to_restore = list(
-        locked_batch.tasks.select_for_update()
+        locked_batch.tasks.select_for_update(of=("self",))
         .select_related(
             "assigned_to",
             "batch",

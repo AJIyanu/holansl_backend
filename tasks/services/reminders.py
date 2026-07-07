@@ -137,7 +137,7 @@ def _lock_task(task):
 
     try:
         return (
-            Task.objects.select_for_update()
+            Task.objects.select_for_update(of=("self",))
             .select_related(
                 "batch",
                 "assigned_to",
@@ -158,7 +158,7 @@ def _lock_reminder(reminder):
 
     try:
         return (
-            TaskReminder.objects.select_for_update()
+            TaskReminder.objects.select_for_update(of=("self",))
             .select_related(
                 "task",
                 "task__batch",
@@ -640,7 +640,7 @@ def cancel_active_task_reminders(
     task_ids = [getattr(task, "pk", task) for task in task_list]
 
     reminders = list(
-        TaskReminder.objects.select_for_update()
+        TaskReminder.objects.select_for_update(of=("self",))
         .select_related(
             "task",
             "task__batch",
@@ -727,7 +727,7 @@ def cancel_reminders_after_batch_due_at(
         return []
 
     reminders = list(
-        TaskReminder.objects.select_for_update()
+        TaskReminder.objects.select_for_update(of=("self",))
         .select_related(
             "task",
             "task__batch",
