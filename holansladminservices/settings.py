@@ -513,3 +513,134 @@ TASK_REMINDER_NOTIFICATION_ACTION_URL = os.getenv(
     "TASK_REMINDER_NOTIFICATION_ACTION_URL",
     "/dashboard/tasks",
 ).strip()
+
+
+# --------------------------------------------------------
+# CRM SENSITIVE DATA
+# --------------------------------------------------------
+
+CRM_FIELD_ENCRYPTION_KEYS = [
+    key.strip()
+    for key in os.getenv(
+        "CRM_FIELD_ENCRYPTION_KEYS",
+        "",
+    ).split(",")
+    if key.strip()
+]
+
+CRM_SENSITIVE_HASH_KEY = os.getenv(
+    "CRM_SENSITIVE_HASH_KEY",
+    "",
+)
+
+# --------------------------------------------------------
+# CRM DOCUMENT STORAGE
+# --------------------------------------------------------
+
+CRM_DOCUMENT_STORAGE_PROVIDER = (
+    os.getenv(
+        "CRM_DOCUMENT_STORAGE_PROVIDER",
+        "google_drive",
+    )
+    .strip()
+    .lower()
+)
+
+CRM_DOCUMENT_MAX_SIZE_BYTES = int(
+    os.getenv(
+        "CRM_DOCUMENT_MAX_SIZE_BYTES",
+        str(20 * 1024 * 1024),
+    )
+)
+
+CRM_DOCUMENT_ALLOWED_MIME_TYPES = {
+    value.strip().lower()
+    for value in os.getenv(
+        "CRM_DOCUMENT_ALLOWED_MIME_TYPES",
+        (
+            "application/pdf,"
+            "image/jpeg,"
+            "image/png,"
+            "text/plain,"
+            "application/msword,"
+            "application/vnd.openxmlformats-officedocument."
+            "wordprocessingml.document,"
+            "application/vnd.ms-excel,"
+            "application/vnd.openxmlformats-officedocument."
+            "spreadsheetml.sheet"
+        ),
+    ).split(",")
+    if value.strip()
+}
+
+CRM_DOCUMENT_EXPIRY_NOTICE_DAYS = int(
+    os.getenv(
+        "CRM_DOCUMENT_EXPIRY_NOTICE_DAYS",
+        "30",
+    )
+)
+
+CRM_NOTIFICATION_CHANNELS = [
+    channel.strip().upper()
+    for channel in os.getenv(
+        "CRM_NOTIFICATION_CHANNELS",
+        "DASHBOARD",
+    ).split(",")
+    if channel.strip()
+]
+
+CRM_NOTIFICATION_ACTION_URL = os.getenv(
+    "CRM_NOTIFICATION_ACTION_URL",
+    "/dashboard/crm/parties",
+).rstrip("/")
+
+# Google Drive document provider.
+
+GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON = os.getenv(
+    "GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON",
+    "",
+)
+
+GOOGLE_DRIVE_SERVICE_ACCOUNT_FILE = os.getenv(
+    "GOOGLE_DRIVE_SERVICE_ACCOUNT_FILE",
+    "",
+)
+
+GOOGLE_DRIVE_ROOT_FOLDER_ID = os.getenv(
+    "GOOGLE_DRIVE_ROOT_FOLDER_ID",
+    "",
+)
+
+GOOGLE_DRIVE_REQUEST_TIMEOUT_SECONDS = int(
+    os.getenv(
+        "GOOGLE_DRIVE_REQUEST_TIMEOUT_SECONDS",
+        "120",
+    )
+)
+
+# Supabase Storage fallback provider.
+
+SUPABASE_STORAGE_URL = os.getenv(
+    "SUPABASE_STORAGE_URL",
+    "",
+).rstrip("/")
+
+SUPABASE_STORAGE_SECRET_KEY = os.getenv(
+    "SUPABASE_STORAGE_SECRET_KEY",
+    os.getenv(
+        "SUPABASE_STORAGE_SERVICE_ROLE_KEY",
+        "",
+    ),
+)
+
+SUPABASE_STORAGE_BUCKET = os.getenv(
+    "SUPABASE_STORAGE_BUCKET",
+    "crm-documents",
+)
+
+SUPABASE_STORAGE_REQUEST_TIMEOUT_SECONDS = int(
+    os.getenv(
+        "SUPABASE_STORAGE_REQUEST_TIMEOUT_SECONDS",
+        "120",
+    )
+)

@@ -1,3 +1,5 @@
-from django.contrib import admin
+"""
+Procurement Django admin placeholder.
 
-# Register your models here.
+No Procurement models are currently registered.
+"""

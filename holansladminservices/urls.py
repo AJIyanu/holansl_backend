@@ -28,8 +28,8 @@ from drf_spectacular.views import (
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("crm/", include("crm.urls")),
-    path("procurement/", include("procurement.urls")),
-    path("ledger/", include("ledger.urls")),
+    # path("procurement/", include("procurement.urls")),
+    # path("ledger/", include("ledger.urls")),
     path("account/", include("accounts.urls")),
     path("notifications/", include("notifications.urls")),
     path("tasks/", include("tasks.urls")),

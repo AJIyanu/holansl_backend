@@ -1,5 +1,13 @@
+"""
+Shared Django REST Framework permission classes.
+
+These permission classes are application-neutral and may be used by any
+backend app that relies on standard Django model permissions.
+"""
+
 from django.conf import settings
 from rest_framework.permissions import SAFE_METHODS, BasePermission
+from rest_framework.permissions import DjangoModelPermissions
 
 
 def can_manage_staff_security(user):
@@ -68,3 +76,35 @@ class CanManageDepartmentLeadership(BasePermission):
             can_manage_staff_security(user)
             or user.has_perm("accounts.manage_departmentleadership")
         )
+
+
+class StrictDjangoModelPermissions(DjangoModelPermissions):
+    """
+    Require Django model permissions for every supported HTTP method.
+
+    Unlike DRF's default DjangoModelPermissions class, GET requests require
+    the model's ``view`` permission.
+
+    Attributes:
+        perms_map: Mapping between HTTP methods and Django permissions.
+    """
+
+    perms_map = {
+        "GET": [
+            "%(app_label)s.view_%(model_name)s",
+        ],
+        "OPTIONS": [],
+        "HEAD": [],
+        "POST": [
+            "%(app_label)s.add_%(model_name)s",
+        ],
+        "PUT": [
+            "%(app_label)s.change_%(model_name)s",
+        ],
+        "PATCH": [
+            "%(app_label)s.change_%(model_name)s",
+        ],
+        "DELETE": [
+            "%(app_label)s.delete_%(model_name)s",
+        ],
+    }

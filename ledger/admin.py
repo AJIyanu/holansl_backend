@@ -1,3 +1,5 @@
-from django.contrib import admin
+"""
+Ledger Django admin placeholder.
 
-# Register your models here.
+No Ledger models are currently registered.
+"""
