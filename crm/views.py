@@ -67,6 +67,8 @@ from .serializers import (
     ContactMethodSerializer,
     ContactRoleSerializer,
     DuplicateCheckSerializer,
+    OrganisationProfileInputSerializer,
+    OrganisationProfileSerializer,
     PartyAffiliationSerializer,
     # existing serializers...
     PartyBankAccountSerializer,
@@ -85,6 +87,8 @@ from .serializers import (
     PartySourceSerializer,
     PartyStatusHistorySerializer,
     PartyWriteSerializer,
+    PersonProfileInputSerializer,
+    PersonProfileSerializer,
     QuickSupplierCreateSerializer,
 )
 from .services import (
@@ -882,6 +886,52 @@ class PartyViewSet(
                     ).data
                 ),
             }
+        )
+
+    @action(detail=True, methods=["patch"], url_path="profile")
+    def profile(self, request, pk=None):
+        """
+        Update the party's person or organisation/trading-name profile.
+
+        This keeps related profile updates outside normal Party PATCH,
+        because PartyWriteSerializer intentionally blocks nested related
+        updates after creation.
+        """
+        party = self.get_object()
+
+        if party.entity_kind == Party.EntityKind.INDIVIDUAL:
+            profile = party.person_profile
+            serializer = PersonProfileInputSerializer(
+                data=request.data,
+                partial=True,
+            )
+            serializer.is_valid(raise_exception=True)
+
+            for field_name, value in serializer.validated_data.items():
+                setattr(profile, field_name, value)
+
+            profile.save()
+
+            return Response(
+                PersonProfileSerializer(profile).data,
+                status=status.HTTP_200_OK,
+            )
+
+        profile = party.organisation_profile
+        serializer = OrganisationProfileInputSerializer(
+            data=request.data,
+            partial=True,
+        )
+        serializer.is_valid(raise_exception=True)
+
+        for field_name, value in serializer.validated_data.items():
+            setattr(profile, field_name, value)
+
+        profile.save()
+
+        return Response(
+            OrganisationProfileSerializer(profile).data,
+            status=status.HTTP_200_OK,
         )
 
 
