@@ -104,6 +104,34 @@ This backend system was built as part of the **ALX ProDev Backend Engineering Pr
 
 ---
 
+## Running tests locally
+
+Use the dedicated test settings module so tests connect to local PostgreSQL
+instead of deriving their test database from the online `DATABASE_URL`:
+
+```bash
+DJANGO_SETTINGS_MODULE=holansladminservices.test_settings python manage.py test --keepdb
+```
+
+By default, the local connection is:
+
+```text
+postgresql://Holan:HolanTestDB@localhost:5432/holan_test
+```
+
+Override it without changing the normal development/server connection:
+
+```bash
+LOCAL_TEST_DATABASE_URL=postgresql://USER:PASSWORD@localhost:5432/DATABASE \
+DJANGO_SETTINGS_MODULE=holansladminservices.test_settings \
+python manage.py test --keepdb
+```
+
+Normal commands such as `python manage.py runserver` continue using the
+regular settings and `DATABASE_URL`.
+
+---
+
 ##  Roadmap
 
 * Docker containerization
@@ -133,4 +161,3 @@ holansl-backend/
 
 This project is developed for **Holan Integrated Services Limited (HolanSL)**.
 All rights reserved.
-

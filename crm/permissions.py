@@ -68,6 +68,7 @@ class PartyActionPermission(BasePermission):
         "quick_create": "crm.add_party",
         "update": "crm.change_party",
         "partial_update": "crm.change_party",
+        "profile": "crm.change_party",
         "destroy": "crm.delete_party",
         "deactivate": "crm.deactivate_party",
         "reactivate": "crm.deactivate_party",
