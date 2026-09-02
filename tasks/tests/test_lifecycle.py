@@ -186,8 +186,12 @@ class TaskLifecycleTests(TaskModelTestCase):
             ],
         )
 
+        completed_task = next(
+            task for task in result.tasks if task.assigned_to_id == self.user.id
+        )
+
         transition_task_status(
-            task=result.tasks[0],
+            task=completed_task,
             actor=self.user,
             new_status=TaskStatus.COMPLETED,
         )
@@ -198,16 +202,20 @@ class TaskLifecycleTests(TaskModelTestCase):
             reason="Assignment withdrawn.",
         )
 
-        result.tasks[0].refresh_from_db()
-        result.tasks[1].refresh_from_db()
+        completed_task.refresh_from_db()
+
+        cancelled_task = next(
+            task for task in result.tasks if task.assigned_to_id == self.other_user.id
+        )
+        cancelled_task.refresh_from_db()
 
         self.assertEqual(
-            result.tasks[0].status,
+            completed_task.status,
             TaskStatus.COMPLETED,
         )
 
         self.assertEqual(
-            result.tasks[1].status,
+            cancelled_task.status,
             TaskStatus.CANCELLED,
         )
 

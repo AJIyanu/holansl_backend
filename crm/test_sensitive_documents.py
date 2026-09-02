@@ -228,11 +228,12 @@ class CRMSensitiveDocumentAPITests(APITestCase):
             *permissions,
         )
 
-        if hasattr(
-            self.user,
+        for cache_name in (
             "_perm_cache",
+            "_user_perm_cache",
+            "_group_perm_cache",
         ):
-            del self.user._perm_cache
+            self.user.__dict__.pop(cache_name, None)
 
     def test_identifier_is_encrypted_and_masked(self):
         """Confirm ordinary responses never include identifier plaintext."""

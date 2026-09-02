@@ -61,7 +61,7 @@ class CRMFoundationModelTests(TestCase):
             "ade market tools",
         )
         self.assertEqual(
-            supplier.name,
+            supplier.display_name,
             "Ade Market Tools",
         )
 

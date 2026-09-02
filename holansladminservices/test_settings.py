@@ -11,7 +11,7 @@ from .settings import *  # noqa: F403
 # Override Django's default database alias with a local-only connection.
 LOCAL_TEST_DATABASE_URL = os.getenv(
     "LOCAL_TEST_DATABASE_URL",
-    "postgresql://Holan:HolanTestDB@localhost:5432/holan_test",
+    "postgresql://Holan:test_password@localhost:5432/holan_test",
 )
 
 DATABASES = {  # noqa: F405
@@ -20,4 +20,3 @@ DATABASES = {  # noqa: F405
         conn_max_age=0,
     ),
 }
-

@@ -160,14 +160,14 @@ def _resolve_selected_user_profiles(
     if missing_ids:
         raise ValidationError(
             {
-                "user_ids": {
-                    "detail": (
+                "user_ids": [
+                    (
                         "One or more selected users are "
                         "inactive, unavailable or do not "
                         "have an active staff profile."
                     ),
-                    "invalid_ids": missing_ids,
-                }
+                    f"Invalid user IDs: {', '.join(missing_ids)}",
+                ]
             }
         )
 

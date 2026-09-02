@@ -1,3 +1,4 @@
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.utils import timezone
 from rest_framework import serializers
 
@@ -19,6 +20,15 @@ from tasks.services.reminders import (
 )
 
 from .common import TaskUserSummarySerializer
+
+
+def raise_reminder_validation_error(exc):
+    """Translate service-layer Django validation errors for the REST API."""
+
+    if hasattr(exc, "message_dict"):
+        raise serializers.ValidationError(exc.message_dict) from exc
+
+    raise serializers.ValidationError(exc.messages) from exc
 
 
 class TaskReminderTaskSerializer(serializers.ModelSerializer):
@@ -130,11 +140,14 @@ class TaskReminderCreateSerializer(serializers.Serializer):
     def create(self, validated_data):
         request = self.context["request"]
 
-        return create_task_reminder(
-            user=request.user,
-            request=request,
-            **validated_data,
-        )
+        try:
+            return create_task_reminder(
+                user=request.user,
+                request=request,
+                **validated_data,
+            )
+        except DjangoValidationError as exc:
+            raise_reminder_validation_error(exc)
 
     def to_representation(self, instance):
         return TaskReminderSerializer(
@@ -184,12 +197,15 @@ class TaskReminderUpdateSerializer(serializers.Serializer):
     def update(self, instance, validated_data):
         request = self.context["request"]
 
-        return update_task_reminder(
-            reminder=instance,
-            user=request.user,
-            request=request,
-            **validated_data,
-        )
+        try:
+            return update_task_reminder(
+                reminder=instance,
+                user=request.user,
+                request=request,
+                **validated_data,
+            )
+        except DjangoValidationError as exc:
+            raise_reminder_validation_error(exc)
 
     def create(self, validated_data):
         raise NotImplementedError
@@ -212,15 +228,18 @@ class TaskReminderCancellationSerializer(serializers.Serializer):
     def update(self, instance, validated_data):
         request = self.context["request"]
 
-        return cancel_task_reminder(
-            reminder=instance,
-            user=request.user,
-            reason=validated_data.get(
-                "reason",
-                "Cancelled by user.",
-            ),
-            request=request,
-        )
+        try:
+            return cancel_task_reminder(
+                reminder=instance,
+                user=request.user,
+                reason=validated_data.get(
+                    "reason",
+                    "Cancelled by user.",
+                ),
+                request=request,
+            )
+        except DjangoValidationError as exc:
+            raise_reminder_validation_error(exc)
 
     def create(self, validated_data):
         raise NotImplementedError

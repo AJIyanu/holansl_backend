@@ -228,11 +228,6 @@ class TaskApiTests(TaskModelTestCase):
         self.user_profile.reports_to = manager
         self.user_profile.save(update_fields=["reports_to"])
 
-        self.grant_permission(
-            self.user,
-            "assign_task",
-        )
-
         create_task_assignment(
             creator=manager.user,
             assignment_type=(TaskAssignmentType.USERS),
@@ -240,11 +235,20 @@ class TaskApiTests(TaskModelTestCase):
             user_ids=[self.user.id],
         )
 
-        create_task_assignment(
-            creator=self.user,
-            assignment_type=(TaskAssignmentType.USERS),
+        manager_batch = self.create_personal_batch(
             title="Created for manager",
-            user_ids=[manager.user.id],
+            assignment_type=(TaskAssignmentType.USERS),
+        )
+
+        self.create_personal_task(
+            batch=manager_batch,
+            assigned_to=manager.user,
+            assignee_name=(manager.user.get_full_name() or manager.user.username),
+            assignee_email=manager.user.email,
+            assignee_employee_id=manager.employee_id,
+            assigned_department=manager.department,
+            assigned_department_name=manager.department.name,
+            assigned_department_code=manager.department.code,
         )
 
         self.authenticate(self.user)

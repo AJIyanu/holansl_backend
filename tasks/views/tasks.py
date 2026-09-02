@@ -240,7 +240,9 @@ class TaskViewSet(
             include_archived=True,
         )
 
-        if archived:
+        if self.action == "restore":
+            queryset = queryset.filter(archived_at__isnull=False)
+        elif archived:
             queryset = queryset.filter(archived_at__isnull=False)
         else:
             queryset = queryset.filter(archived_at__isnull=True)

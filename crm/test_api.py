@@ -227,7 +227,7 @@ class CRMStageThreeAPITests(APITestCase):
 
         self.assertEqual(
             response.data["code"],
-            "supplier_source_required",
+            ["supplier_source_required"],
         )
 
     def test_duplicate_check_detects_matching_marketplace_id(self):

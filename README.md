@@ -116,7 +116,7 @@ DJANGO_SETTINGS_MODULE=holansladminservices.test_settings python manage.py test 
 By default, the local connection is:
 
 ```text
-postgresql://Holan:HolanTestDB@localhost:5432/holan_test
+postgresql://Holan:test_password@localhost:5432/holan_test
 ```
 
 Override it without changing the normal development/server connection:
