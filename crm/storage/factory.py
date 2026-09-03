@@ -18,8 +18,7 @@ from .supabase import (
 )
 
 
-@lru_cache(maxsize=1)
-def get_document_storage() -> DocumentStorageBackend:
+def get_document_storage(provider=None) -> DocumentStorageBackend:
     """
     Return the configured document-storage provider.
 
@@ -31,14 +30,23 @@ def get_document_storage() -> DocumentStorageBackend:
     """
 
     provider = (
-        getattr(
-            settings,
-            "CRM_DOCUMENT_STORAGE_PROVIDER",
-            "google_drive",
+        (
+            provider
+            if provider is not None
+            else getattr(
+                settings,
+                "CRM_DOCUMENT_STORAGE_PROVIDER",
+                "supabase",
+            )
         )
         .strip()
         .lower()
     )
+    return _get_document_storage(provider)
+
+
+@lru_cache(maxsize=2)
+def _get_document_storage(provider):
 
     if provider == "google_drive":
         return GoogleDriveDocumentStorage()
@@ -57,4 +65,4 @@ def clear_document_storage_cache() -> None:
         None.
     """
 
-    get_document_storage.cache_clear()
+    _get_document_storage.cache_clear()

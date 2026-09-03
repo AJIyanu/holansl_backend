@@ -17,7 +17,7 @@ codes, storage keys or sensitive CRM data in logs, general caches or URL paramet
 other than the existing protected reset-link flow. Preserve neutral reset-request
 responses and expiry/single-use rules.
 
-## Permission policy — approved target
+## Permission policy
 
 - Django superusers bypass permission checks without needing an executive role.
   This does not waive data-integrity protections or required business validation.
@@ -25,32 +25,40 @@ responses and expiry/single-use rules.
   names alone must not bypass checks.
 - Both roles receive all permissions by default, and every newly introduced
   permission must be automatically assigned to those roles.
+- Existing roles receive the initial full baseline through an explicit operator
+  command. Subsequent creation hooks grant only new permissions, not missing old
+  assignments. Permission edits, seeding and no-op migrations do not restore removals.
 - Backend enforcement, including object/queryset scope, is authoritative. Frontend
   navigation/action visibility mirrors access; it is not security enforcement.
 - Preserve current per-resource deletion/integrity protections. Do not interpret
   broad permission assignment as permission to erase referenced records.
 
-This target is NOT fully reflected in current code. Existing executive bypasses
-and restrictive update/PATCH paths need reconciliation, as does automatic
-provisioning. Implementation is deferred under TODO.md. Do not document the target
-as live behaviour or change groups/permissions during unrelated work.
+User/profile PUT and PATCH use model permissions consistently. Account-status
+changes additionally require change_user; role assignment requires change_role
+and possession of the assigned permissions. Only superusers may modify superuser
+accounts. Role edits cannot grant permissions the actor does not hold. Existing
+superuser-only permanent deletion of users/profiles/leadership is preserved.
+Audit lists, summaries and AI insight require view_auditlog; role names grant no
+access. See [rollout instructions](operations/EXECUTIVE_PERMISSIONS.md).
 
-## Email/notification policy — deferred implementation
+## Email/notification policy
 
-Password-reset email must use the notification service and its Resend adapter.
-Accounts should retain token creation/verification and reset business rules;
-notifications owns delivery. Currently accounts calls Resend directly because it
-predates notifications. Preserve that working behaviour until the dedicated
-plan/implementation is approved. Never send a real reset email as a test.
+Password-reset and initial-password emails use notifications.services.send_sensitive_email
+and the shared Resend adapter. Accounts retains token creation/verification and
+reset business rules. These links are email-only: no dashboard/WhatsApp fallback,
+notification/outbox records, ordinary preferences, quiet hours or queued retries.
+Raw links/bodies remain in memory for sending; provider error details and response
+metadata are discarded. Accounts audits safe reset-record/provider identifiers.
+Never send a real reset email as a test. Provider acceptance is not inbox receipt.
 
-## Storage policy — deferred implementation
+## Storage policy
 
-Supabase private storage is the approved default target. Google Drive is dormant/
-redundant for now, not an automatic fallback and not authorized for deletion.
-Current source defaults/configuration may differ. Do not alter settings, .env,
-buckets, existing documents or adapters in this documentation/theme task.
-Later verify configuration without revealing secrets and plan historical-document
-compatibility before switching defaults. See TODO.md.
+Supabase private storage is the default. Google Drive remains available for old
+records and an explicitly configured rollback, never an automatic fallback.
+Downloads/deletions select each document's recorded provider. Supabase uploads
+and downloads check bucket privacy first and fail closed if public or unverifiable.
+Do not migrate files, change bucket visibility or delete provider credentials merely
+to switch defaults. See [storage operations](operations/STORAGE.md).
 
 Keep downloads/previews permission-checked, private URLs hidden and confidential
 documents under stronger authorization. Retain masking/encryption/audited reveal

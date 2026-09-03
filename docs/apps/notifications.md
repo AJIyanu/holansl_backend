@@ -100,6 +100,29 @@ actual running worker/scheduler, not just a model row.
 
 ## Configuration and verification
 
+### Sensitive authentication email
+
+Accounts uses `notifications.services.send_sensitive_email` for password-reset
+and initial-password links. This internal Python service is not an HTTP endpoint.
+It reuses the Resend adapter but sends an in-memory payload immediately, even in
+outbox processing mode. No Notification, NotificationRecipient or NotificationDelivery
+rows are created. Do not pass authentication secrets to ordinary `notify` or dispatch.
+
+There is no channel override, dashboard/WhatsApp fallback, preference suppression,
+quiet-hours delay or automatic retry. Missing configuration/destination fails;
+provider exceptions are sanitized and response metadata is discarded. Only acceptance
+status/provider ID returns to the caller. Accounts owns token lifecycle and safe audits.
+
+Required configuration: `NOTIFICATION_EMAIL_ENABLED=True`, `RESEND_API_KEY`, and
+`RESEND_FROM_EMAIL` (complete verified sender). Existing `RESEND_FROM_NAME` plus
+`EMAIL_HOST_USER` remains the compatibility fallback for the sender, not SMTP transport.
+Accounts also needs `FRONTEND_URL`. Local settings are present; live Resend key/domain
+validity and inbox receipt require a separately authorized smoke test. No new settings,
+dependencies or migrations are needed. Do not print secrets to validate configuration.
+
+Focused tests: `manage.py test accounts.test_password_email notifications.tests.test_sensitive_email`
+with isolated local test settings. All provider requests must be mocked.
+
 NOTIFICATION_PROCESSING_MODE, retry/lock/batch settings, retention, email settings,
 NOTIFICATION_CRON_SECRET and provider flags live in project settings.
 The process_notification_deliveries and cleanup_notifications management commands

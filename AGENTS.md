@@ -49,6 +49,11 @@ documents are standards/specifications, not additional agent entry points.
   test settings; never fall back to online DATABASE_URL.
 - Declare added Python dependencies in requirements.txt and report what/why.
 - Keep app/API documentation current and report validation honestly.
-- Notification-based password-reset delivery, Supabase-default storage and
-  CEO/CTO permission provisioning are approved requirements but deferred runtime
-  work; see docs/TODO.md. Do not claim they are already implemented.
+- Password-reset delivery uses notifications' sensitive email-only service;
+  never route reset links through persisted notifications or other channels.
+- Supabase is the default for new documents; use recorded providers for existing
+  documents and never silently fall back to Drive. Preserve private-bucket checks.
+- CEO/CTO use assigned permissions, not role-name authorization. Grant newly
+  created permissions additively; never restore revoked grants during seeding or
+  routine synchronization. Existing-role baseline provisioning is an explicit
+  operator action; see docs/operations/EXECUTIVE_PERMISSIONS.md and docs/TODO.md.

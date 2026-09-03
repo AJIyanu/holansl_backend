@@ -5,7 +5,6 @@ These permission classes are application-neutral and may be used by any
 backend app that relies on standard Django model permissions.
 """
 
-from django.conf import settings
 from rest_framework.permissions import SAFE_METHODS, BasePermission
 from rest_framework.permissions import DjangoModelPermissions
 
@@ -17,16 +16,12 @@ def can_manage_staff_security(user):
     if user.is_superuser:
         return True
 
-    user_roles = {
-        name.casefold() for name in user.groups.values_list("name", flat=True)
-    }
-
-    return bool(user_roles & settings.STAFF_MANAGEMENT_ROLES)
+    return user.has_perm("accounts.change_user")
 
 
 class CanViewAuditLogs(BasePermission):
     """
-    Superusers, CEO/CTO, or users with accounts.view_auditlog.
+    Superusers or users with accounts.view_auditlog.
     """
 
     def has_permission(self, request, view):
@@ -35,23 +30,19 @@ class CanViewAuditLogs(BasePermission):
         return bool(
             user
             and user.is_authenticated
-            and (
-                can_manage_staff_security(user)
-                or user.has_perm("accounts.view_auditlog")
-            )
+            and (user.is_superuser or user.has_perm("accounts.view_auditlog"))
         )
 
 
 class IsSecurityExecutive(BasePermission):
     """
-    Allows only Django superusers and users with configured
-    executive roles such as CEO or CTO.
+    Compatibility class name: security reporting requires view_auditlog.
     """
 
     message = "You do not have permission to access this resource."
 
     def has_permission(self, request, view):
-        return can_manage_staff_security(request.user)
+        return CanViewAuditLogs().has_permission(request, view)
 
 
 class CanManageDepartmentLeadership(BasePermission):
@@ -67,15 +58,9 @@ class CanManageDepartmentLeadership(BasePermission):
             return True
 
         if request.method in SAFE_METHODS:
-            return bool(
-                can_manage_staff_security(user)
-                or user.has_perm("accounts.view_departmentleadership")
-            )
+            return bool(user.has_perm("accounts.view_departmentleadership"))
 
-        return bool(
-            can_manage_staff_security(user)
-            or user.has_perm("accounts.manage_departmentleadership")
-        )
+        return bool(user.has_perm("accounts.manage_departmentleadership"))
 
 
 class StrictDjangoModelPermissions(DjangoModelPermissions):

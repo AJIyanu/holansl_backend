@@ -166,6 +166,12 @@ class Command(BaseCommand):
         for role_name, rule in ROLE_PERMISSION_RULES.items():
             role, created = Role.objects.get_or_create(name=role_name)
 
+            if role_name in {"CEO", "CTO"}:
+                # New executive roles are initialized by the creation hook.
+                # Existing roles must not have revoked grants restored by seeding.
+                self.stdout.write(f"Preserved executive permissions: {role_name}")
+                continue
+
             permissions = Permission.objects.filter(
                 content_type__app_label__in=rule["apps"],
             )

@@ -135,8 +135,10 @@ Storage errors are translated by document services/views; do not expose provider
 secrets or raw exceptions.
 
 Private document storage adapters support Google Drive and Supabase. The source
-default CRM_DOCUMENT_STORAGE_PROVIDER is google_drive, not proof of active
-production configuration. Default CRM_DOCUMENT_MAX_SIZE_BYTES is 20 MiB.
+default CRM_DOCUMENT_STORAGE_PROVIDER is supabase. Downloads/deletions use the
+document's recorded storage_provider, preserving legacy Drive access; no automatic
+fallback occurs. Supabase uploads/downloads require a verified private bucket.
+See [storage operations](../operations/STORAGE.md). Default CRM_DOCUMENT_MAX_SIZE_BYTES is 20 MiB.
 Allowed MIME types cover PDF, JPEG, PNG, TXT, DOC/DOCX and XLS/XLSX.
 Configure encryption/hash keys and provider credentials server-side only.
 Current Next.js Server Action body limit is 25mb, independently of backend/storage

@@ -540,7 +540,7 @@ CRM_SENSITIVE_HASH_KEY = os.getenv(
 CRM_DOCUMENT_STORAGE_PROVIDER = (
     os.getenv(
         "CRM_DOCUMENT_STORAGE_PROVIDER",
-        "google_drive",
+        "supabase",
     )
     .strip()
     .lower()
@@ -618,7 +618,7 @@ GOOGLE_DRIVE_REQUEST_TIMEOUT_SECONDS = int(
     )
 )
 
-# Supabase Storage fallback provider.
+# Supabase Storage default provider (no automatic fallback).
 
 SUPABASE_STORAGE_URL = os.getenv(
     "SUPABASE_STORAGE_URL",

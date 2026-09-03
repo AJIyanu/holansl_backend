@@ -85,9 +85,9 @@ Do not remove the old key until every old ciphertext has been re-encrypted.
 
 Changing `CRM_SENSITIVE_HASH_KEY` invalidates deterministic lookup hashes. It must not be rotated without a controlled data migration.
 
-## Google Drive configuration
+## Google Drive legacy/rollback configuration
 
-Recommended settings:
+Only for existing Drive records or an explicitly approved upload rollback:
 
 ```env
 CRM_DOCUMENT_STORAGE_PROVIDER=google_drive
@@ -106,7 +106,7 @@ Use:
 
 The service account must have sufficient access to create folders, upload, download and delete files beneath the configured root.
 
-## Supabase Storage fallback
+## Supabase Storage default
 
 ```env
 CRM_DOCUMENT_STORAGE_PROVIDER=supabase
@@ -115,7 +115,9 @@ SUPABASE_STORAGE_SERVICE_ROLE_KEY=<SERVICE_ROLE_KEY>
 SUPABASE_STORAGE_BUCKET=crm-documents
 ```
 
-The bucket must be private.
+The bucket must be private. Uploads and downloads verify this before object access.
+There is no automatic Drive fallback. Existing files use each record's stored
+provider. See [current storage operations](../operations/STORAGE.md).
 
 The service-role key belongs only in the backend environment and must never be sent to the browser.
 

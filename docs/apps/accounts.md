@@ -24,18 +24,18 @@ serializer validation and service rules can impose additional restrictions.
 
 | Methods | Path | Handler / operation | Permission classes |
 | --- | --- | --- | --- |
-| GET, POST | `/account/users/` | `UserViewSet`: list, create | IsAdminUser, DjangoModelPermissions |
-| GET, PUT, PATCH, DELETE | `/account/users/{id}/` | `UserViewSet`: retrieve, update, partial_update, destroy | IsAdminUser, DjangoModelPermissions |
-| GET, POST | `/account/profiles/` | `StaffProfileViewSet`: list, create | IsAdminUser, DjangoModelPermissions |
-| GET, PUT, PATCH, DELETE | `/account/profiles/{id}/` | `StaffProfileViewSet`: retrieve, update, partial_update, destroy | IsAdminUser, DjangoModelPermissions |
-| GET, POST | `/account/departments/` | `DepartmentViewSet`: list, create | IsAdminUser, DjangoModelPermissions |
-| GET, PUT, PATCH, DELETE | `/account/departments/{id}/` | `DepartmentViewSet`: retrieve, update, partial_update, destroy | IsAdminUser, DjangoModelPermissions |
+| GET, POST | `/account/users/` | `UserViewSet`: list, create | IsAdminUser, StrictDjangoModelPermissions |
+| GET, PUT, PATCH, DELETE | `/account/users/{id}/` | `UserViewSet`: retrieve, update, partial_update, destroy | IsAdminUser, StrictDjangoModelPermissions |
+| GET, POST | `/account/profiles/` | `StaffProfileViewSet`: list, create | IsAdminUser, StrictDjangoModelPermissions |
+| GET, PUT, PATCH, DELETE | `/account/profiles/{id}/` | `StaffProfileViewSet`: retrieve, update, partial_update, destroy | IsAdminUser, StrictDjangoModelPermissions |
+| GET, POST | `/account/departments/` | `DepartmentViewSet`: list, create | IsAdminUser, StrictDjangoModelPermissions |
+| GET, PUT, PATCH, DELETE | `/account/departments/{id}/` | `DepartmentViewSet`: retrieve, update, partial_update, destroy | IsAdminUser, StrictDjangoModelPermissions |
 | GET, POST | `/account/department-leadership/` | `DepartmentLeadershipViewSet`: list, create | IsAuthenticated, CanManageDepartmentLeadership |
 | GET, PUT, PATCH, DELETE | `/account/department-leadership/{id}/` | `DepartmentLeadershipViewSet`: retrieve, update, partial_update, destroy | IsAuthenticated, CanManageDepartmentLeadership |
-| GET, POST | `/account/roles/` | `RoleViewSet`: list, create | IsAdminUser |
-| GET, PUT, PATCH, DELETE | `/account/roles/{id}/` | `RoleViewSet`: retrieve, update, partial_update, destroy | IsAdminUser |
-| GET | `/account/permissions/` | `PermissionViewSet`: list | IsAdminUser |
-| GET | `/account/permissions/{id}/` | `PermissionViewSet`: retrieve | IsAdminUser |
+| GET, POST | `/account/roles/` | `RoleViewSet`: list, create | IsAdminUser, StrictDjangoModelPermissions |
+| GET, PUT, PATCH, DELETE | `/account/roles/{id}/` | `RoleViewSet`: retrieve, update, partial_update, destroy | IsAdminUser, StrictDjangoModelPermissions |
+| GET | `/account/permissions/` | `PermissionViewSet`: list | IsAdminUser, StrictDjangoModelPermissions |
+| GET | `/account/permissions/{id}/` | `PermissionViewSet`: retrieve | IsAdminUser, StrictDjangoModelPermissions |
 | GET | `/account/audit-logs/` | `AuditLogViewSet`: list | IsAuthenticated, CanViewAuditLogs |
 | GET | `/account/audit-logs/ai-insight/` | `AuditLogViewSet`: ai_insight | IsAuthenticated, IsSecurityExecutive |
 | GET | `/account/audit-logs/summary/` | `AuditLogViewSet`: summary | IsAuthenticated, IsSecurityExecutive |
@@ -67,14 +67,20 @@ serializer validation and service rules can impose additional restrictions.
   formatted permissions. UserSummarySerializer and StaffProfileReadSerializer
   define list/detail contracts; UserWriteSerializer and StaffProfileWriteSerializer
   define writes. Do not reuse read-only response fields as write payloads.
-- User/profile writes require IsAdminUser plus model permissions. update and
-  destroy also restrict to superuser. partial_update calls through update; do not
-  assume the privileged-field role check alone grants CEO/CTO PATCH access.
+- User/profile/department APIs require staff status and strict model permissions,
+  including view permissions for reads. User/profile PUT and PATCH enforce the
+  same rules; account status also requires change_user, role assignment change_role
+  and possession of assigned permissions. Superuser accounts remain protected.
+  Permanent user/profile deletion remains superuser-only.
 - Department leadership uses CanManageDepartmentLeadership; hierarchy validation
-  lives in models/serializers. Role and permission routes use IsAdminUser.
-- Audit/login lists require CanViewAuditLogs (including configured executive
-  roles or native audit-view permission). Summary AND AI actions require
-  IsSecurityExecutive, not merely permission to view audit rows.
+  lives in models/serializers. Role/permission routes require staff status and
+  strict model permissions (accounts.*_role and auth.view_permission respectively).
+- Audit/login lists, summary and AI actions require accounts.view_auditlog, with
+  a superuser bypass. IsSecurityExecutive is retained as a compatibility class
+  name, but no longer checks role names.
+- CEO/CTO receive new permissions through creation/migration hooks; explicit
+  initial provisioning and operational limits are documented in
+  [executive rollout](../operations/EXECUTIVE_PERMISSIONS.md).
 
 ## Filtering and examples
 
@@ -93,10 +99,15 @@ failure 502. Other common failures follow [shared conventions](API_CONVENTIONS.m
 
 ## Integrations and known differences
 
-Password reset currently calls Resend directly from accounts/utils.py. This is
-an existing exception to centralized notification ownership, not permission for
-new apps to duplicate delivery. Email sender/API configuration and FRONTEND_URL
-are required; never log raw reset codes. Security AI/configured cache require
+Password reset and default-password login call notifications.services.send_sensitive_email
+from accounts/utils.py; notifications owns Resend transport. Email sender/API
+configuration, NOTIFICATION_EMAIL_ENABLED and FRONTEND_URL are required.
+The service sends immediately and returns only safe acceptance metadata; reset
+links never enter dashboard/WhatsApp, the outbox, audit metadata or API responses.
+On failure, existing account handling invalidates the new reset record and returns
+the existing error response. No background retry occurs; the user can request a
+fresh link. Existing eligibility-neutral responses and routes are unchanged.
+Security AI/configured cache require
 their provider/cache settings; implementation is not proof of live availability.
 
 There are no registered /account/change-password/, /account/logout/ or dedicated

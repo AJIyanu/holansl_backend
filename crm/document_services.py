@@ -418,7 +418,7 @@ def download_party_document(
     if not document.is_active:
         raise CRMConflict("Deleted CRM documents cannot be downloaded.")
 
-    storage = get_document_storage()
+    storage = get_document_storage(document.storage_provider)
 
     downloaded = storage.download(
         external_file_id=document.external_file_id,
@@ -481,7 +481,7 @@ def delete_party_document(
     if not locked_document.is_active:
         return locked_document
 
-    storage = get_document_storage()
+    storage = get_document_storage(locked_document.storage_provider)
 
     storage.delete(
         external_file_id=(locked_document.external_file_id),

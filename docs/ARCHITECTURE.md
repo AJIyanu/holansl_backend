@@ -18,7 +18,8 @@ and user-facing interactions. Django owns authentication, authorization,
 validation, business transitions, audit and the API layer.
 PostgreSQL stores business data. Supabase is the intended managed database/private
 storage platform, not a replacement for Django or an excuse to add browser
-database access/Supabase Auth. Storage-default changes are deferred in TODO.md.
+database access/Supabase Auth. New CRM uploads default to private Supabase storage;
+existing documents use their recorded storage provider without automatic fallback.
 
 Backend deployment references Render; frontend references Vercel. Verify runtime
 configuration rather than assuming documentation proves live service availability.

@@ -13,5 +13,7 @@ Start at the repository-root [AGENTS.md](../AGENTS.md).
 | [TODO actions](TODO.md)                         | Explicitly deferred implementation and open decisions           |
 
 Frontend standards live in the [frontend docs](../../holansladmininterface/docs/README.md).
+Operational rollout: [private storage](operations/STORAGE.md) and
+[executive permission provisioning](operations/EXECUTIVE_PERMISSIONS.md).
 Documents describe either current behaviour or approved target requirements;
 never treat a target requirement as an implemented feature.

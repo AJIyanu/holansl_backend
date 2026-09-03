@@ -8,7 +8,6 @@ from rest_framework.exceptions import PermissionDenied
 from rest_framework.generics import RetrieveAPIView
 from rest_framework.permissions import (
     AllowAny,
-    DjangoModelPermissions,
     IsAdminUser,
     IsAuthenticated,
 )
@@ -35,6 +34,7 @@ from .permissions import (
     CanViewAuditLogs,
     IsSecurityExecutive,
     can_manage_staff_security,
+    StrictDjangoModelPermissions,
 )
 from .serializers import (
     AuditLogSerializer,
@@ -55,12 +55,62 @@ from .serializers import (
 )
 
 
-class UserViewSet(viewsets.ModelViewSet):
+class StaffMutationGuard:
+    """Apply privilege guards to creation, PUT and PATCH consistently."""
+
+    def check_staff_mutation(self, serializer):
+        actor = self.request.user
+        if actor.is_superuser:
+            return
+        instance = serializer.instance
+        target = instance.user if isinstance(instance, StaffProfile) else instance
+        if target is not None and target.is_superuser:
+            raise PermissionDenied("Only a superuser may modify a superuser account.")
+        data = serializer.validated_data
+        if {"is_active", "is_staff"} & data.keys() and not can_manage_staff_security(
+            actor
+        ):
+            raise PermissionDenied(
+                "Changing account status requires accounts.change_user."
+            )
+        roles = data.get("groups", data.get("roles"))
+        if roles is not None:
+            if not actor.has_perm("accounts.change_role"):
+                raise PermissionDenied("Assigning roles requires accounts.change_role.")
+            for role in roles:
+                required = [
+                    f"{app}.{code}"
+                    for app, code in role.permissions.values_list(
+                        "content_type__app_label", "codename"
+                    )
+                ]
+                if not actor.has_perms(required):
+                    raise PermissionDenied(
+                        "You cannot assign permissions you do not hold."
+                    )
+
+    def perform_create(self, serializer):
+        self.check_staff_mutation(serializer)
+        super().perform_create(serializer)
+
+    def perform_update(self, serializer):
+        self.check_staff_mutation(serializer)
+        super().perform_update(serializer)
+
+
+class UserViewSet(StaffMutationGuard, viewsets.ModelViewSet):
+    """Staff-only users API with action-specific accounts user permissions.
+
+    PUT/PATCH require change_user. Role assignment also requires change_role and
+    possession of the assigned permissions. Only superusers may modify superuser
+    accounts or permanently delete users. CEO/CTO role names do not bypass checks.
+    """
+
     queryset = User.objects.prefetch_related("groups").all().order_by("-date_joined")
 
     permission_classes = [
         IsAdminUser,
-        DjangoModelPermissions,
+        StrictDjangoModelPermissions,
     ]
 
     filterset_fields = [
@@ -93,32 +143,6 @@ class UserViewSet(viewsets.ModelViewSet):
             return UserSummarySerializer
 
         return UserWriteSerializer
-
-    def update(self, request, *args, **kwargs):
-        if not request.user.is_superuser:
-            raise PermissionDenied(
-                "You do not have permission to perform this operation."
-            )
-
-        return super().update(request, *args, **kwargs)
-
-    def partial_update(self, request, *args, **kwargs):
-        privileged_fields = {
-            "is_active",
-            "is_staff",
-            "roles",
-        }
-
-        requested_fields = set(request.data.keys())
-
-        if requested_fields & privileged_fields and not can_manage_staff_security(
-            request.user
-        ):
-            raise PermissionDenied(
-                "You do not have permission to perform this operation."
-            )
-
-        return super().partial_update(request, *args, **kwargs)
 
     def destroy(self, request, *args, **kwargs):
         if not request.user.is_superuser:
@@ -205,7 +229,14 @@ class ForgotPasswordView(APIView):
         )
 
 
-class StaffProfileViewSet(viewsets.ModelViewSet):
+class StaffProfileViewSet(StaffMutationGuard, viewsets.ModelViewSet):
+    """Staff-only profiles API with action-specific staffprofile permissions.
+
+    PUT/PATCH require change_staffprofile. Account-status changes also require
+    change_user; role assignment requires change_role and the assigned permissions.
+    Superuser accounts and permanent profile deletion remain superuser-protected.
+    """
+
     queryset = (
         StaffProfile.objects.select_related(
             "user",
@@ -220,7 +251,7 @@ class StaffProfileViewSet(viewsets.ModelViewSet):
 
     permission_classes = [
         IsAdminUser,
-        DjangoModelPermissions,
+        StrictDjangoModelPermissions,
     ]
 
     filterset_fields = [
@@ -263,34 +294,6 @@ class StaffProfileViewSet(viewsets.ModelViewSet):
 
         return StaffProfileWriteSerializer
 
-    def update(self, request, *args, **kwargs):
-        if not request.user.is_superuser:
-            raise PermissionDenied(
-                "You do not have permission to perform this operation."
-            )
-
-        return super().update(request, *args, **kwargs)
-
-    def partial_update(self, request, *args, **kwargs):
-        privileged_fields = {
-            "department",
-            "reports_to",
-            "is_active",
-            "is_staff",
-            "roles",
-        }
-
-        requested_fields = set(request.data.keys())
-
-        if requested_fields & privileged_fields and not can_manage_staff_security(
-            request.user
-        ):
-            raise PermissionDenied(
-                "You do not have permission to perform this operation."
-            )
-
-        return super().partial_update(request, *args, **kwargs)
-
     def destroy(self, request, *args, **kwargs):
         if not request.user.is_superuser:
             raise PermissionDenied(
@@ -332,7 +335,7 @@ class DepartmentViewSet(viewsets.ModelViewSet):
 
     permission_classes = [
         IsAdminUser,
-        DjangoModelPermissions,
+        StrictDjangoModelPermissions,
     ]
 
     search_fields = ["name", "code"]
@@ -414,11 +417,15 @@ class DepartmentLeadershipViewSet(viewsets.ModelViewSet):
 
 
 class RoleViewSet(viewsets.ModelViewSet):
-    """API endpoint for roles (groups)."""
+    """Staff-only roles API requiring action-specific accounts role permissions.
+
+    Actors cannot grant permissions they do not hold. New CEO/CTO roles receive
+    all current permissions; later explicit removals are not automatically restored.
+    """
 
     queryset = Role.objects.all()
     serializer_class = RoleSerializer
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAdminUser, StrictDjangoModelPermissions]
 
     # --- Filtering, Search, and Ordering ---
     search_fields = ["name"]
@@ -429,11 +436,12 @@ class PermissionViewSet(viewsets.ReadOnlyModelViewSet):
     """
     API endpoint to view available permissions in the system.
     This is a read-only endpoint.
+    Requires staff status and auth.view_permission (or superuser permission bypass).
     """
 
     queryset = Permission.objects.all()
     serializer_class = PermissionSerializer
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAdminUser, StrictDjangoModelPermissions]
     pagination_class = None
 
 

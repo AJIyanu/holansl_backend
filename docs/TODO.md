@@ -4,21 +4,22 @@ Status recorded 2026-09-03. This file describes deferred work, not permission to
 execute it. Each item requires a plan, approval, implementation and tests before
 being marked complete. Log actual delivery/corrections locally with timestamps.
 
-## N01 — PLANNING: notification-based password-reset email
+## N01 — COMPLETE: ~~notification-based password-reset email~~
 
-Latest user instruction: present a configuration/integration plan for approval.
-Do not mark complete until implemented and verified.
+Implemented and locally verified 2026-09-03 after plan approval. Both reset flows
+use notifications' immediate sensitive-email service and shared Resend provider.
+No dashboard/WhatsApp deliveries or persisted secret bodies. Full suite: 179 tests
+passed; final focused suite: 11 tests passed (including two additional configuration
+checks added after full-suite discovery). Live delivery was not exercised.
+See [notification documentation](apps/notifications.md) for configuration/operations.
 
-- Inspect notification Resend provider configuration and accounts' current sender.
-- Keep reset token generation, expiry, single use and neutral responses in accounts.
-- Route reset delivery through the existing notification service (not necessarily
-  an HTTP call back into Django). Do not duplicate transport or leak raw tokens
-  into durable notification/audit metadata.
-- Define safe sensitive-link lifetime/retention, retry, failure and onboarding UX.
-- Test mocked provider success/failure and onboarding/password-reset flows.
-- Preserve current routes; do not send real emails during tests.
-- Password-reset and initial-password links must use email only: never dashboard
-  or WhatsApp, with no fallback to either channel.
+- [x] Reuse existing Resend configuration/provider and remove accounts transport duplication.
+- [x] Preserve account token lifecycle, login block, response contracts and safe audits.
+- [x] Email-only, immediate delivery; no preference/quiet-hour suppression or queued retry.
+- [x] Redact provider errors; omit raw reset links from results and persistent records.
+- [x] Mock provider success/failure, test reset/onboarding and configuration failures.
+- [ ] Optional operational follow-up: separately authorize a live Resend smoke test;
+  configuration presence and mocked acceptance do not prove inbox receipt.
 
 ## Q01 — DEFERRED: remaining frontend ESLint findings
 
@@ -31,28 +32,32 @@ Do not mark complete until implemented and verified.
 - Unused frontend imports were removed separately; do not disable rules to hide
   remaining findings. Plan and approve behavioural fixes, then test and log them.
 
-## S01 — DEFERRED: Supabase-default private document storage
+## S01 — COMPLETE: ~~Supabase-default private document storage~~
 
-Latest user instruction: do not implement storage changes in the current task.
+Implemented and verified 2026-09-03. Source defaults now match the existing
+Supabase environment selection; a read-only check confirmed an accessible private
+bucket. New uploads use the default, existing document downloads/deletions use
+their recorded provider. Drive is retained for legacy records/explicit rollback,
+never automatic fallback. Privacy and failure checks are tested; no live file
+write, file migration or schema migration occurred.
+See [storage operations](operations/STORAGE.md).
 
-- Verify configuration safely; existence/health is not yet confirmed.
-- Make Supabase the default in a separately approved change.
-- Keep Google Drive dormant; do not delete adapters, migrate files or enable
-  fallback without an explicit plan.
-- Preserve access to existing protected documents and rollback capability.
-- Test upload validation, confidentiality, protected download and provider failure.
+## A01 — IMPLEMENTED; initial application-database baseline pending approval
 
-## A01 — DEFERRED: executive permission policy and provisioning
+- [x] Replace role-name bypasses with assigned permissions; preserve superuser bypass.
+- [x] Consistent PUT/PATCH and security checks, role-grant escalation protections,
+  existing permanent-delete safeguards.
+- [x] Grant only new permissions through creation/migration hooks. No routine
+  restoration of removed permissions; default-account seeding preserves removals.
+- [x] Add a preview-first command for the one-time complete CEO/CTO baseline.
+- [x] Full suite passed 203 tests; final focused suite passed 23 tests, including
+  the role-rename regression added after full-suite discovery.
+- [ ] Obtain approval and apply the baseline to the application database before
+  deployment; no application groups/permissions were changed during implementation.
 
-- Make CEO/CTO rely on assigned permissions, not role-name bypasses.
-- Automatically assign all existing/new permissions to both roles by an agreed,
-  idempotent provisioning strategy. Decide how deliberate revocations interact
-  with synchronization before implementation.
-- Keep superuser bypass independent of role membership.
-- Reconcile current user/profile update/PATCH checks and executive security checks.
-- Test ordinary users, CEO/CTO with/without permission, superuser without groups,
-  new permission creation and database-integrity protections.
-- Do not mutate live groups or permission assignments in this task.
+No schema migration is needed. See [rollout instructions](operations/EXECUTIVE_PERMISSIONS.md).
+Keep this item open until the baseline is applied and verified. Frontend delegated
+role-assignment controls may need a separately approved change_role visibility check.
 
 ## Future domain work
 

@@ -141,7 +141,7 @@ class ReportingHierarchyTestCase(APITestCase):
         with self.assertRaises(ValidationError):
             self.staff.full_clean()
 
-    def test_non_superuser_cannot_patch_profile_reports_to(self):
+    def test_permission_granted_executive_can_patch_profile_reports_to(self):
         self.client.force_authenticate(self.executive.user)
 
         response = self.client.patch(
@@ -157,14 +157,14 @@ class ReportingHierarchyTestCase(APITestCase):
 
         self.assertEqual(
             response.status_code,
-            status.HTTP_403_FORBIDDEN,
+            status.HTTP_200_OK,
         )
 
         self.staff.refresh_from_db()
 
         self.assertEqual(
             self.staff.reports_to_id,
-            None,
+            self.manager.id,
         )
 
     def test_current_user_response_contains_reports_to(self):

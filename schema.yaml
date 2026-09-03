@@ -803,6 +803,7 @@ paths:
       description: |-
         API endpoint to view available permissions in the system.
         This is a read-only endpoint.
+        Requires staff status and auth.view_permission (or superuser permission bypass).
       parameters:
       - name: ordering
         required: false
@@ -837,6 +838,7 @@ paths:
       description: |-
         API endpoint to view available permissions in the system.
         This is a read-only endpoint.
+        Requires staff status and auth.view_permission (or superuser permission bypass).
       parameters:
       - in: path
         name: id
@@ -860,6 +862,12 @@ paths:
   /account/profiles/:
     get:
       operationId: account_profiles_list
+      description: |-
+        Staff-only profiles API with action-specific staffprofile permissions.
+
+        PUT/PATCH require change_staffprofile. Account-status changes also require
+        change_user; role assignment requires change_role and the assigned permissions.
+        Superuser accounts and permanent profile deletion remain superuser-protected.
       parameters:
       - in: query
         name: department
@@ -944,6 +952,12 @@ paths:
           description: ''
     post:
       operationId: account_profiles_create
+      description: |-
+        Staff-only profiles API with action-specific staffprofile permissions.
+
+        PUT/PATCH require change_staffprofile. Account-status changes also require
+        change_user; role assignment requires change_role and the assigned permissions.
+        Superuser accounts and permanent profile deletion remain superuser-protected.
       tags:
       - account
       requestBody:
@@ -972,6 +986,12 @@ paths:
   /account/profiles/{id}/:
     get:
       operationId: account_profiles_retrieve
+      description: |-
+        Staff-only profiles API with action-specific staffprofile permissions.
+
+        PUT/PATCH require change_staffprofile. Account-status changes also require
+        change_user; role assignment requires change_role and the assigned permissions.
+        Superuser accounts and permanent profile deletion remain superuser-protected.
       parameters:
       - in: path
         name: id
@@ -995,6 +1015,12 @@ paths:
           description: ''
     put:
       operationId: account_profiles_update
+      description: |-
+        Staff-only profiles API with action-specific staffprofile permissions.
+
+        PUT/PATCH require change_staffprofile. Account-status changes also require
+        change_user; role assignment requires change_role and the assigned permissions.
+        Superuser accounts and permanent profile deletion remain superuser-protected.
       parameters:
       - in: path
         name: id
@@ -1030,6 +1056,12 @@ paths:
           description: ''
     patch:
       operationId: account_profiles_partial_update
+      description: |-
+        Staff-only profiles API with action-specific staffprofile permissions.
+
+        PUT/PATCH require change_staffprofile. Account-status changes also require
+        change_user; role assignment requires change_role and the assigned permissions.
+        Superuser accounts and permanent profile deletion remain superuser-protected.
       parameters:
       - in: path
         name: id
@@ -1064,6 +1096,12 @@ paths:
           description: ''
     delete:
       operationId: account_profiles_destroy
+      description: |-
+        Staff-only profiles API with action-specific staffprofile permissions.
+
+        PUT/PATCH require change_staffprofile. Account-status changes also require
+        change_user; role assignment requires change_role and the assigned permissions.
+        Superuser accounts and permanent profile deletion remain superuser-protected.
       parameters:
       - in: path
         name: id
@@ -1084,7 +1122,11 @@ paths:
   /account/roles/:
     get:
       operationId: account_roles_list
-      description: API endpoint for roles (groups).
+      description: |-
+        Staff-only roles API requiring action-specific accounts role permissions.
+
+        Actors cannot grant permissions they do not hold. New CEO/CTO roles receive
+        all current permissions; later explicit removals are not automatically restored.
       parameters:
       - name: ordering
         required: false
@@ -1125,7 +1167,11 @@ paths:
           description: ''
     post:
       operationId: account_roles_create
-      description: API endpoint for roles (groups).
+      description: |-
+        Staff-only roles API requiring action-specific accounts role permissions.
+
+        Actors cannot grant permissions they do not hold. New CEO/CTO roles receive
+        all current permissions; later explicit removals are not automatically restored.
       tags:
       - account
       requestBody:
@@ -1154,7 +1200,11 @@ paths:
   /account/roles/{id}/:
     get:
       operationId: account_roles_retrieve
-      description: API endpoint for roles (groups).
+      description: |-
+        Staff-only roles API requiring action-specific accounts role permissions.
+
+        Actors cannot grant permissions they do not hold. New CEO/CTO roles receive
+        all current permissions; later explicit removals are not automatically restored.
       parameters:
       - in: path
         name: id
@@ -1177,7 +1227,11 @@ paths:
           description: ''
     put:
       operationId: account_roles_update
-      description: API endpoint for roles (groups).
+      description: |-
+        Staff-only roles API requiring action-specific accounts role permissions.
+
+        Actors cannot grant permissions they do not hold. New CEO/CTO roles receive
+        all current permissions; later explicit removals are not automatically restored.
       parameters:
       - in: path
         name: id
@@ -1212,7 +1266,11 @@ paths:
           description: ''
     patch:
       operationId: account_roles_partial_update
-      description: API endpoint for roles (groups).
+      description: |-
+        Staff-only roles API requiring action-specific accounts role permissions.
+
+        Actors cannot grant permissions they do not hold. New CEO/CTO roles receive
+        all current permissions; later explicit removals are not automatically restored.
       parameters:
       - in: path
         name: id
@@ -1246,7 +1304,11 @@ paths:
           description: ''
     delete:
       operationId: account_roles_destroy
-      description: API endpoint for roles (groups).
+      description: |-
+        Staff-only roles API requiring action-specific accounts role permissions.
+
+        Actors cannot grant permissions they do not hold. New CEO/CTO roles receive
+        all current permissions; later explicit removals are not automatically restored.
       parameters:
       - in: path
         name: id
@@ -1266,6 +1328,12 @@ paths:
   /account/users/:
     get:
       operationId: account_users_list
+      description: |-
+        Staff-only users API with action-specific accounts user permissions.
+
+        PUT/PATCH require change_user. Role assignment also requires change_role and
+        possession of the assigned permissions. Only superusers may modify superuser
+        accounts or permanently delete users. CEO/CTO role names do not bypass checks.
       parameters:
       - in: query
         name: email
@@ -1334,6 +1402,12 @@ paths:
           description: ''
     post:
       operationId: account_users_create
+      description: |-
+        Staff-only users API with action-specific accounts user permissions.
+
+        PUT/PATCH require change_user. Role assignment also requires change_role and
+        possession of the assigned permissions. Only superusers may modify superuser
+        accounts or permanently delete users. CEO/CTO role names do not bypass checks.
       tags:
       - account
       requestBody:
@@ -1362,6 +1436,12 @@ paths:
   /account/users/{id}/:
     get:
       operationId: account_users_retrieve
+      description: |-
+        Staff-only users API with action-specific accounts user permissions.
+
+        PUT/PATCH require change_user. Role assignment also requires change_role and
+        possession of the assigned permissions. Only superusers may modify superuser
+        accounts or permanently delete users. CEO/CTO role names do not bypass checks.
       parameters:
       - in: path
         name: id
@@ -1385,6 +1465,12 @@ paths:
           description: ''
     put:
       operationId: account_users_update
+      description: |-
+        Staff-only users API with action-specific accounts user permissions.
+
+        PUT/PATCH require change_user. Role assignment also requires change_role and
+        possession of the assigned permissions. Only superusers may modify superuser
+        accounts or permanently delete users. CEO/CTO role names do not bypass checks.
       parameters:
       - in: path
         name: id
@@ -1420,6 +1506,12 @@ paths:
           description: ''
     patch:
       operationId: account_users_partial_update
+      description: |-
+        Staff-only users API with action-specific accounts user permissions.
+
+        PUT/PATCH require change_user. Role assignment also requires change_role and
+        possession of the assigned permissions. Only superusers may modify superuser
+        accounts or permanently delete users. CEO/CTO role names do not bypass checks.
       parameters:
       - in: path
         name: id
@@ -1454,6 +1546,12 @@ paths:
           description: ''
     delete:
       operationId: account_users_destroy
+      description: |-
+        Staff-only users API with action-specific accounts user permissions.
+
+        PUT/PATCH require change_user. Role assignment also requires change_role and
+        possession of the assigned permissions. Only superusers may modify superuser
+        accounts or permanently delete users. CEO/CTO role names do not bypass checks.
       parameters:
       - in: path
         name: id

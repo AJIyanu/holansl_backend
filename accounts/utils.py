@@ -3,14 +3,13 @@ import secrets
 from datetime import timedelta
 
 from django.conf import settings
-import logging
-
-import resend
+from django.utils.html import escape
 from django.utils import timezone
+from django.views.decorators.debug import sensitive_variables
+
+from notifications.services import send_sensitive_email
 
 from .models import AuditLog, PasswordResetCode
-
-logger = logging.getLogger(__name__)
 
 
 def get_client_ip(request):
@@ -120,33 +119,13 @@ def build_password_reset_link(raw_token):
     return f"{frontend_url}/resetpassword?code={raw_token}"
 
 
-def get_resend_sender():
-    """
-    Prefer the complete Resend sender value:
-    'HolanSL Admin <noreply@holansl.com>'
-
-    Fall back to EMAIL_HOST_USER when RESEND_FROM_EMAIL is not configured.
-    """
-    if settings.RESEND_FROM_EMAIL:
-        return settings.RESEND_FROM_EMAIL
-
-    if settings.EMAIL_HOST_USER:
-        return f"{settings.RESEND_FROM_NAME} <{settings.EMAIL_HOST_USER}>"
-
-    raise RuntimeError("RESEND_FROM_EMAIL or EMAIL_HOST_USER must be configured.")
-
-
+@sensitive_variables()
 def send_password_reset_email(
     user,
     raw_token,
     *,
     purpose=PasswordResetCode.Purpose.PASSWORD_RESET,
 ):
-    if not settings.RESEND_API_KEY:
-        raise RuntimeError("RESEND_API_KEY is not configured.")
-
-    resend.api_key = settings.RESEND_API_KEY
-
     reset_link = build_password_reset_link(raw_token)
     display_name = user.get_full_name() or user.username
 
@@ -172,13 +151,13 @@ def send_password_reset_email(
         <div style="max-width: 600px; margin: 0 auto; padding: 24px;">
           <h2>{heading}</h2>
 
-          <p>Hello {display_name},</p>
+          <p>Hello {escape(display_name)},</p>
 
           <p>{introduction}</p>
 
           <p style="margin: 28px 0;">
             <a
-              href="{reset_link}"
+              href="{escape(reset_link)}"
               style="
                 display: inline-block;
                 padding: 12px 20px;
@@ -227,24 +206,7 @@ contact your administrator.
 HolanSL Admin
 """.strip()
 
-    try:
-        response = resend.Emails.send(
-            {
-                "from": get_resend_sender(),
-                "to": [user.email],
-                "subject": subject,
-                "html": html,
-                "text": text,
-            }
-        )
-    except Exception:
-        logger.exception(
-            "Resend failed to send password reset email to user %s",
-            user.pk,
-        )
-        raise
-
-    return {
-        "reset_link": reset_link,
-        "email_id": response.get("id") if response else None,
-    }
+    result = send_sensitive_email(
+        destination=user.email, subject=subject, body_html=html, body_text=text
+    )
+    return {"email_id": result.provider_message_id}

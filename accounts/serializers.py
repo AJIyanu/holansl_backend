@@ -1081,6 +1081,31 @@ class RoleSerializer(serializers.ModelSerializer):
         model = Role
         fields = ("id", "name", "permissions")
 
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        request = self.context.get("request")
+        if request is None or request.user.is_superuser:
+            return attrs
+        permissions = attrs.get("permissions", [])
+        name = attrs.get("name", self.instance.name if self.instance else "")
+        if name.upper() in {"CEO", "CTO"} and (
+            self.instance is None or self.instance.name.upper() != name.upper()
+        ):
+            permissions = Permission.objects.select_related("content_type").all()
+        required = [f"{p.content_type.app_label}.{p.codename}" for p in permissions]
+        if not request.user.has_perms(required):
+            raise serializers.ValidationError(
+                "You cannot grant permissions you do not hold."
+            )
+        return attrs
+
+    def create(self, validated_data):
+        role = super().create(validated_data)
+        if role.name.upper() in {"CEO", "CTO"}:
+            # DRF's many-to-many write follows the creation signal.
+            role.permissions.add(*Permission.objects.values_list("pk", flat=True))
+        return role
+
 
 class CurrentUserStaffProfileSerializer(serializers.ModelSerializer):
     department = DepartmentSummarySerializer(read_only=True)

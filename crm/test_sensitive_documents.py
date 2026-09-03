@@ -196,7 +196,7 @@ class CRMSensitiveDocumentAPITests(APITestCase):
             return_value=self.fake_storage,
         )
 
-        self.storage_patch.start()
+        self.storage_factory = self.storage_patch.start()
         self.addCleanup(
             self.storage_patch.stop,
         )
@@ -536,7 +536,7 @@ class CRMSensitiveDocumentAPITests(APITestCase):
             mime_type="text/plain",
             size_bytes=10,
             checksum_sha256="c" * 64,
-            storage_provider=(PartyDocument.StorageProvider.SUPABASE),
+            storage_provider=(PartyDocument.StorageProvider.GOOGLE_DRIVE),
             external_file_id="record.txt",
             storage_path="record.txt",
         )
@@ -561,6 +561,10 @@ class CRMSensitiveDocumentAPITests(APITestCase):
         )
 
         document.refresh_from_db()
+
+        self.storage_factory.assert_called_with(
+            PartyDocument.StorageProvider.GOOGLE_DRIVE
+        )
 
         self.assertFalse(
             document.is_active,

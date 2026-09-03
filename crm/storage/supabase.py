@@ -68,6 +68,12 @@ class SupabaseDocumentStorage(DocumentStorageBackend):
 
         self.api_url = f"{base_url}/storage/v1"
 
+    def _request(self, method, *args, **kwargs):
+        try:
+            return method(*args, **kwargs, allow_redirects=False)
+        except requests.RequestException:
+            raise DocumentStorageError("Supabase Storage request failed.") from None
+
     def _headers(
         self,
         *,
@@ -148,11 +154,13 @@ class SupabaseDocumentStorage(DocumentStorageBackend):
             DocumentStorageError: If the upload fails.
         """
 
+        self.check_configuration()
         object_path = f"parties/{party_id}/{category}/{document_id}/{filename}"
 
         file_object.seek(0)
 
-        response = requests.post(
+        response = self._request(
+            requests.post,
             self._object_url(object_path),
             headers={
                 **self._headers(
@@ -170,8 +178,7 @@ class SupabaseDocumentStorage(DocumentStorageBackend):
             201,
         }:
             raise DocumentStorageError(
-                "Supabase Storage upload failed: "
-                f"{response.status_code} {response.text}"
+                f"Supabase Storage upload failed: HTTP {response.status_code}"
             )
 
         return StoredDocument(
@@ -204,9 +211,11 @@ class SupabaseDocumentStorage(DocumentStorageBackend):
             DocumentStorageError: If the object cannot be downloaded.
         """
 
+        self.check_configuration()
         object_path = storage_path or external_file_id
 
-        response = requests.get(
+        response = self._request(
+            requests.get,
             self._object_url(
                 object_path,
                 authenticated=True,
@@ -218,8 +227,7 @@ class SupabaseDocumentStorage(DocumentStorageBackend):
 
         if not response.ok:
             raise DocumentStorageError(
-                "Supabase Storage download failed: "
-                f"{response.status_code} {response.text}"
+                f"Supabase Storage download failed: HTTP {response.status_code}"
             )
 
         temporary_file = tempfile.SpooledTemporaryFile(
@@ -267,7 +275,8 @@ class SupabaseDocumentStorage(DocumentStorageBackend):
 
         object_path = storage_path or external_file_id
 
-        response = requests.delete(
+        response = self._request(
+            requests.delete,
             (f"{self.api_url}/object/{quote(self.bucket, safe='')}"),
             headers={
                 **self._headers(
@@ -288,8 +297,7 @@ class SupabaseDocumentStorage(DocumentStorageBackend):
             404,
         }:
             raise DocumentStorageError(
-                "Supabase Storage deletion failed: "
-                f"{response.status_code} {response.text}"
+                f"Supabase Storage deletion failed: HTTP {response.status_code}"
             )
 
     def check_configuration(self) -> dict:
@@ -303,7 +311,8 @@ class SupabaseDocumentStorage(DocumentStorageBackend):
             DocumentStorageError: If the bucket cannot be read.
         """
 
-        response = requests.get(
+        response = self._request(
+            requests.get,
             (f"{self.api_url}/bucket/{quote(self.bucket, safe='')}"),
             headers=self._headers(),
             timeout=self.timeout,
@@ -311,11 +320,17 @@ class SupabaseDocumentStorage(DocumentStorageBackend):
 
         if not response.ok:
             raise DocumentStorageError(
-                "Supabase Storage bucket check failed: "
-                f"{response.status_code} {response.text}"
+                f"Supabase Storage bucket check failed: HTTP {response.status_code}"
             )
 
-        payload = response.json()
+        try:
+            payload = response.json()
+        except ValueError:
+            raise DocumentStorageError("Invalid Supabase bucket response.") from None
+        if not isinstance(payload, dict):
+            raise DocumentStorageError("Invalid Supabase bucket response.")
+        if payload.get("public") is not False:
+            raise DocumentStorageError("Supabase Storage bucket must be private.")
 
         return {
             "provider": (PartyDocument.StorageProvider.SUPABASE),
