@@ -9,3 +9,4 @@ crm_rebuild_backups/
 
 # Local-only development inventory and roadmap; never force-add this file.
 /DEVELOPMENT_LOG.local.md
+.ruff_cache/

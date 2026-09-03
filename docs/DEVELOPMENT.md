@@ -36,6 +36,19 @@ Use Ruff for Python linting/formatting and Prettier for Next.js. Avoid unrelated
 whole-repository formatting. Use the installed project toolchain; if missing,
 report that rather than pretending a check passed.
 
+Formatting commands (from the repository root):
+
+```bash
+./venv/bin/ruff format .
+./venv/bin/ruff format --check .
+./venv/bin/ruff check .
+```
+
+Ruff is pinned in requirements.txt and configured in ruff.toml for Python 3.12.
+Migration history, dependencies, collected static files and backups are excluded.
+Formatting does not apply lint fixes; address behaviour-affecting lint findings
+in a separately approved task. Whole-repository formatting requires explicit scope.
+
 ## Database safety
 
 Treat all application databases as production, despite development status.

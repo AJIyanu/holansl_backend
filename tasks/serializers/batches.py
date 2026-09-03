@@ -105,10 +105,7 @@ class TaskBatchDetailSerializer(TaskBatchSummarySerializer):
         if total is None:
             counts = {
                 row["status"]: row["count"]
-                for row in (
-                    batch.tasks.values("status")
-                    .annotate(count=Count("id"))
-                )
+                for row in (batch.tasks.values("status").annotate(count=Count("id")))
             }
 
             total = sum(counts.values())

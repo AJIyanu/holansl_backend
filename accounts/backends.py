@@ -2,11 +2,13 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.backends import ModelBackend
 from django.db.models import Q
 
+
 class EmailOrUsernameBackend(ModelBackend):
     """
     Custom authentication backend to allow users to log in
     using either their email address or their username.
     """
+
     def authenticate(self, request, username=None, password=None, **kwargs):
         UserModel = get_user_model()
         try:

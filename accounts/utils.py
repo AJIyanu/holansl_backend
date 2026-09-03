@@ -131,14 +131,9 @@ def get_resend_sender():
         return settings.RESEND_FROM_EMAIL
 
     if settings.EMAIL_HOST_USER:
-        return (
-            f"{settings.RESEND_FROM_NAME} "
-            f"<{settings.EMAIL_HOST_USER}>"
-        )
+        return f"{settings.RESEND_FROM_NAME} <{settings.EMAIL_HOST_USER}>"
 
-    raise RuntimeError(
-        "RESEND_FROM_EMAIL or EMAIL_HOST_USER must be configured."
-    )
+    raise RuntimeError("RESEND_FROM_EMAIL or EMAIL_HOST_USER must be configured.")
 
 
 def send_password_reset_email(

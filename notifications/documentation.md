@@ -189,9 +189,7 @@ notify(
     notification_type="task.assigned",
     category="task",
     title="New task assigned",
-    message=(
-        "A new task has been assigned to you."
-    ),
+    message=("A new task has been assigned to you."),
     channels=[
         NotificationChannel.DASHBOARD,
         NotificationChannel.EMAIL,
@@ -203,9 +201,7 @@ notify(
     metadata={
         "task_batch_id": str(task_batch.id),
     },
-    deduplication_key=(
-        f"task-batch-assigned:{task_batch.id}"
-    ),
+    deduplication_key=(f"task-batch-assigned:{task_batch.id}"),
 )
 ```
 
@@ -217,9 +213,7 @@ notify(
     notification_type="task.assigned",
     category="task",
     title="New task assigned",
-    message=(
-        "A new task has been assigned to you."
-    ),
+    message=("A new task has been assigned to you."),
     channels=[
         NotificationChannel.DASHBOARD,
         NotificationChannel.EMAIL,
@@ -228,9 +222,7 @@ notify(
     actor=request.user,
     source=task_batch,
     template_key="task.assigned",
-    deduplication_key=(
-        f"task-batch-assigned:{task_batch.id}"
-    ),
+    deduplication_key=(f"task-batch-assigned:{task_batch.id}"),
 )
 ```
 

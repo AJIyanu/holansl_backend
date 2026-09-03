@@ -4,9 +4,10 @@ Status recorded 2026-09-03. This file describes deferred work, not permission to
 execute it. Each item requires a plan, approval, implementation and tests before
 being marked complete. Log actual delivery/corrections locally with timestamps.
 
-## N01 — DEFERRED: notification-based password-reset email
+## N01 — PLANNING: notification-based password-reset email
 
-Latest user instruction: do not implement notification changes in the current task.
+Latest user instruction: present a configuration/integration plan for approval.
+Do not mark complete until implemented and verified.
 
 - Inspect notification Resend provider configuration and accounts' current sender.
 - Keep reset token generation, expiry, single use and neutral responses in accounts.
@@ -16,6 +17,19 @@ Latest user instruction: do not implement notification changes in the current ta
 - Define safe sensitive-link lifetime/retention, retry, failure and onboarding UX.
 - Test mocked provider success/failure and onboarding/password-reset flows.
 - Preserve current routes; do not send real emails during tests.
+- Password-reset and initial-password links must use email only: never dashboard
+  or WhatsApp, with no fallback to either channel.
+
+## Q01 — DEFERRED: remaining frontend ESLint findings
+
+- Refactor JSX inside try/catch in the three task page/list components (93 errors).
+- Review synchronous state updates inside effects (10 errors), preserving forms,
+  filters, loading states and security behaviours.
+- Review notification icon component identity in both copies (2 errors).
+- Review React Hook Form watch/compiler compatibility (2 warnings).
+- Review the unused local labelClass helper (not an import) in CRM related records.
+- Unused frontend imports were removed separately; do not disable rules to hide
+  remaining findings. Plan and approve behavioural fixes, then test and log them.
 
 ## S01 — DEFERRED: Supabase-default private document storage
 
