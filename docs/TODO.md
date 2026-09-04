@@ -42,7 +42,7 @@ never automatic fallback. Privacy and failure checks are tested; no live file
 write, file migration or schema migration occurred.
 See [storage operations](operations/STORAGE.md).
 
-## A01 — IMPLEMENTED; initial application-database baseline pending approval
+## A01 — COMPLETE: ~~executive permission policy and provisioning~~
 
 - [x] Replace role-name bypasses with assigned permissions; preserve superuser bypass.
 - [x] Consistent PUT/PATCH and security checks, role-grant escalation protections,
@@ -52,11 +52,11 @@ See [storage operations](operations/STORAGE.md).
 - [x] Add a preview-first command for the one-time complete CEO/CTO baseline.
 - [x] Full suite passed 203 tests; final focused suite passed 23 tests, including
   the role-rename regression added after full-suite discovery.
-- [ ] Obtain approval and apply the baseline to the application database before
-  deployment; no application groups/permissions were changed during implementation.
+- [x] Approved baseline applied and verified on 2026-09-04: CEO and CTO each
+  have all 191 current permissions (65 added to each). Other groups unchanged.
 
 No schema migration is needed. See [rollout instructions](operations/EXECUTIVE_PERMISSIONS.md).
-Keep this item open until the baseline is applied and verified. Frontend delegated
+Baseline rollout is complete; no migration was run. Frontend delegated
 role-assignment controls may need a separately approved change_role visibility check.
 
 ## Future domain work

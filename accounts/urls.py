@@ -7,6 +7,7 @@ from .views import (
     DepartmentViewSet,
     ForgotPasswordView,
     LoginActivityViewSet,
+    LogoutView,
     PasswordResetConfirmView,
     PasswordResetVerifyView,
     PermissionViewSet,
@@ -45,6 +46,7 @@ router.register(
 urlpatterns = [
     path("", include(router.urls)),
     path("me/", CurrentUserView.as_view(), name="current-user"),
+    path("logout/", LogoutView.as_view(), name="logout"),
     path(
         "password-reset/verify/",
         PasswordResetVerifyView.as_view(),

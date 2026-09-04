@@ -35,6 +35,7 @@ ALLOWED_RANGES = {
 LOGIN_EVENT_TYPES = [
     AuditLog.EventType.LOGIN_SUCCESS,
     AuditLog.EventType.LOGIN_FAILED,
+    AuditLog.EventType.LOGOUT,
     AuditLog.EventType.DEFAULT_PASSWORD_LOGIN_BLOCKED,
     AuditLog.EventType.PASSWORD_RESET_LINK_SENT,
     AuditLog.EventType.PASSWORD_RESET_COMPLETED,

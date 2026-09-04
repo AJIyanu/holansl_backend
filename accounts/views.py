@@ -53,6 +53,8 @@ from .serializers import (
     UserSummarySerializer,
     UserWriteSerializer,
 )
+from .token_services import LogoutTokenError, revoke_token_pair
+from .utils import create_audit_log
 
 
 class StaffMutationGuard:
@@ -155,6 +157,65 @@ class UserViewSet(StaffMutationGuard, viewsets.ModelViewSet):
 
 class HolanTokenObtainPairView(TokenObtainPairView):
     serializer_class = HolanTokenObtainPairSerializer
+
+
+class LogoutView(APIView):
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        access_token = request.data.get("access")
+        refresh_token = request.data.get("refresh")
+
+        if not access_token or not refresh_token:
+            create_audit_log(
+                event_category=AuditLog.EventCategory.AUTH,
+                event_type=AuditLog.EventType.LOGOUT,
+                status=AuditLog.EventStatus.FAILED,
+                request=request,
+                metadata={"reason": "Access and refresh tokens are required."},
+            )
+            return Response(
+                {"detail": "Access and refresh tokens are required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            user = revoke_token_pair(
+                access=access_token,
+                refresh=refresh_token,
+            )
+        except LogoutTokenError as exc:
+            create_audit_log(
+                event_category=AuditLog.EventCategory.AUTH,
+                event_type=AuditLog.EventType.LOGOUT,
+                status=AuditLog.EventStatus.FAILED,
+                request=request,
+                metadata={"reason": str(exc)},
+            )
+            return Response(
+                {"detail": str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        create_audit_log(
+            user=user,
+            target_user=user,
+            event_category=AuditLog.EventCategory.AUTH,
+            event_type=AuditLog.EventType.LOGOUT,
+            status=AuditLog.EventStatus.SUCCESS,
+            request=request,
+            metadata={
+                "path": request.path,
+                "method": request.method,
+                "revoked": ["access", "refresh"],
+            },
+        )
+
+        return Response(
+            {"detail": "Logout successful."},
+            status=status.HTTP_200_OK,
+        )
 
 
 class PasswordResetVerifyView(APIView):

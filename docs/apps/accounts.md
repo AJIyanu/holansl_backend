@@ -1,6 +1,6 @@
 # Accounts application
 
-Status: implemented in source. Last reviewed: 2026-09-03.
+Status: implemented in source. Last reviewed: 2026-09-04.
 
 ## Purpose and implementation
 
@@ -45,6 +45,7 @@ serializer validation and service rules can impose additional restrictions.
 | GET | `/account/login-activity/summary/` | `LoginActivityViewSet`: summary | IsAuthenticated, IsSecurityExecutive |
 | GET | `/account/login-activity/{id}/` | `LoginActivityViewSet`: retrieve | IsAuthenticated, CanViewAuditLogs |
 | GET | `/account/me/` | `CurrentUserView`: get | IsAuthenticated |
+| POST | `/account/logout/` | `LogoutView`: revoke access and refresh JWTs | AllowAny; signed matching token pair required |
 | POST | `/account/password-reset/verify/` | `PasswordResetVerifyView`: post | AllowAny |
 | POST | `/account/password-reset/confirm/` | `PasswordResetConfirmView`: post | AllowAny |
 | GET | `/account/health/` | `health_check`: get | AllowAny |
@@ -57,6 +58,11 @@ serializer validation and service rules can impose additional restrictions.
 - Token obtain accepts username/password credentials through the configured
   email-or-username backend; successful response contains access and refresh JWTs.
   Refresh accepts {"refresh":"TOKEN"} and returns an access token.
+- Logout accepts {"access":"TOKEN","refresh":"TOKEN"}. Both JWTs must be
+  signed, unexpired, have their expected token types and belong to the same user.
+  A successful request blacklists both JWT IDs, immediately rejects the access
+  token on authenticated APIs, prevents refresh, and records a LOGOUT audit event.
+  Invalid or mismatched pairs return 400 and record a token-free failed event.
 - must_change_password blocks token login and triggers reset email flow; it is not
   the restricted authenticated change-password session described in old planning.
 - Reset request accepts {"email":"staff@example.invalid"} with neutral eligibility
@@ -110,9 +116,14 @@ fresh link. Existing eligibility-neutral responses and routes are unchanged.
 Security AI/configured cache require
 their provider/cache settings; implementation is not proof of live availability.
 
-There are no registered /account/change-password/, /account/logout/ or dedicated
-user activate/deactivate action routes. Next.js logout is separate.
+There are no registered /account/change-password/ or dedicated user
+activate/deactivate action routes. Next.js clears its HTTP-only cookies immediately
+and schedules `/account/logout/` as post-response work.
 Do not copy hypothetical role/department fields from the old handover.
+
+The SimpleJWT blacklist application must be migrated during deployment so its
+OutstandingToken and BlacklistedToken tables exist. No accounts migration is
+introduced; the tables come from the installed SimpleJWT package migrations.
 
 ## Verification
 

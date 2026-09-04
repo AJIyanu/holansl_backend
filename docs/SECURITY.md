@@ -17,6 +17,13 @@ codes, storage keys or sensitive CRM data in logs, general caches or URL paramet
 other than the existing protected reset-link flow. Preserve neutral reset-request
 responses and expiry/single-use rules.
 
+Logout revokes both the access and refresh JWT IDs through SimpleJWT's blacklist
+tables. JWT authentication checks the blacklist so a revoked access token cannot
+be reused for its remaining lifetime, while standard refresh validation rejects
+the revoked refresh token. Logout audits must contain only safe outcome metadata,
+never either raw token. Deployments must apply the packaged blacklist migrations
+before serving logout or authenticated requests with blacklist-aware settings.
+
 ## Permission policy
 
 - Django superusers bypass permission checks without needing an executive role.

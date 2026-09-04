@@ -13,11 +13,12 @@ to create missing executive roles and add every current permission to both.
 Use `--database` only for the intended database alias. The command is transactional
 and additive: it does not remove existing grants or alter other groups.
 
-This command has NOT been run against the application database as part of implementation.
-Arrange the approved baseline before deploying the removal of role-name bypasses,
-otherwise existing executives missing assigned permissions may temporarily lose access.
-No schema migration is needed. Record the prior assignments before the operator
-applies a baseline if rollback is needed; rolling back code does not undo grants.
+The approved baseline was applied to the configured application database on
+2026-09-04. CEO and CTO each moved from 126 to all 191 current permissions;
+other group assignments were verified unchanged. No migration was run.
+For another environment, arrange its approved baseline before deploying the
+removal of role-name bypasses. Record prior assignments before applying a baseline
+if rollback is needed; rolling back code does not undo grants.
 
 Never schedule `--apply` as synchronization: explicitly rerunning it restores all
 current permissions, including intentionally removed ones.
