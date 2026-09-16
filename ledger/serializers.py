@@ -1,6 +1,7 @@
 """Explicit write contracts; never accept approval, totals, actors or posting flags."""
 
 from collections.abc import Mapping
+from decimal import Decimal
 from rest_framework import serializers
 from drf_spectacular.utils import extend_schema_serializer
 from ledger import models as m
@@ -86,6 +87,7 @@ class FinancialInput(StrictSerializer):
     line = pk(m.InvoiceLine, required=False)
     authorization = pk(m.ClientWithholdingAuthorization, required=False)
     certificate_reference = serializers.CharField(required=False)
+    taxable_base = money(min_value=0, required=False)
     tax_policy = pk(m.TaxPolicyVersion, required=False)
     period_from = serializers.DateField(required=False)
     period_to = serializers.DateField(required=False)
@@ -102,7 +104,13 @@ class FinancialInput(StrictSerializer):
             "CLEARANCE": {"cost_lines", "advance"},
             "ADVANCE": {"amount", "custodian"},
             "CREDIT": {"invoice", "credit_lines"},
-            "WITHHOLDING": {"line", "authorization", "certificate_reference", "amount"},
+            "WITHHOLDING": {
+                "line",
+                "authorization",
+                "certificate_reference",
+                "amount",
+                "taxable_base",
+            },
             "TAX_REMITTANCE": {"tax_policy", "period_from", "period_to", "amount"},
             "MANUAL": {"journal_lines"},
             "OPENING": {"journal_lines"},
@@ -122,7 +130,7 @@ class FinancialInput(StrictSerializer):
             raise serializers.ValidationError(
                 {k: "Field is not valid for this record type." for k in invalid}
             )
-        required = extras - {"due_date", "target"}
+        required = extras - {"due_date", "target", "taxable_base"}
         missing = required - set(data)
         if missing:
             raise serializers.ValidationError(
@@ -184,6 +192,16 @@ class TaxReportInput(StrictSerializer):
 
 
 class AuthorizationInput(StrictSerializer):
+    treatment = serializers.ChoiceField(choices=["VAT", "INCOME_WHT"], default="VAT")
+    rate = serializers.DecimalField(
+        max_digits=7,
+        decimal_places=4,
+        min_value=Decimal("0.0001"),
+        max_value=100,
+        default="2.5",
+    )
+    credit_account = pk(m.LedgerAccount, required=False)
+
     party = pk(Party)
     tax_type = pk(m.TaxType)
     effective_from = serializers.DateField()
@@ -226,6 +244,8 @@ class YearInput(StrictSerializer):
 
 
 class SetupEditInput(StrictSerializer):
+    custodian = pk(get_user_model(), required=False, allow_null=True)
+
     name = serializers.CharField(max_length=150, required=False)
     symbol = serializers.CharField(max_length=8, required=False)
     authority = serializers.CharField(max_length=150, required=False)
@@ -242,7 +262,7 @@ SETUP_FIELDS = {
     m.Currency: ["code", "name", "symbol", "minor_units", "active"],
     m.LedgerAccount: ["code", "name", "classification", "purpose", "parent", "active"],
     m.AccountCurrency: ["account", "currency"],
-    m.CashAccount: ["name", "kind", "account", "active"],
+    m.CashAccount: ["name", "kind", "account", "active", "custodian"],
     m.PostingPolicyVersion: [
         "name",
         "receivable",

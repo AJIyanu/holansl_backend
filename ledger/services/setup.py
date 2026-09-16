@@ -76,6 +76,11 @@ def create_setup(user, model, data):
             "Account and currency must be active.",
         )
     elif model is m.CashAccount:
+        custodian = data.get("custodian")
+        check(
+            not custodian or custodian.is_active and custodian.is_staff,
+            "Cash custodian must be active staff.",
+        )
         check(
             data["account"].account.classification == "ASSET",
             "A bank/cash account must be an asset.",
@@ -127,7 +132,7 @@ def update_setup(user, obj, data):
     allowed = {
         m.Currency: {"name", "symbol", "active"},
         m.LedgerAccount: {"name", "active"},
-        m.CashAccount: {"name", "active"},
+        m.CashAccount: {"name", "active", "custodian"},
         m.TaxType: {"name", "authority"},
     }.get(type(obj), set())
     data = dict(data)
@@ -138,6 +143,12 @@ def update_setup(user, obj, data):
         "Only descriptive fields and active status may change; create a new policy for accounting changes.",
     )
     obj = type(obj).objects.select_for_update().get(pk=obj.pk)
+    if isinstance(obj, m.CashAccount):
+        custodian = data.get("custodian")
+        check(
+            not custodian or custodian.is_active and custodian.is_staff,
+            "Cash custodian must be active staff.",
+        )
     for field, value in data.items():
         setattr(obj, field, value)
     obj.full_clean(exclude=["created_by"])

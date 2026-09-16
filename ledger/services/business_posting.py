@@ -6,6 +6,7 @@ from django.db.models import Sum
 from django.utils import timezone
 from ledger import models as m
 from .common import (
+    amount,
     get_record,
     require,
     make,
@@ -335,7 +336,43 @@ def post(user, record, expected):
             value <= invoice_due(line.invoice), "Deduction exceeds invoice outstanding."
         )
         policy = line.tax_policy
-        if policy.treatment == "CLIENT_REMITTANCE":
+        if auth.treatment == "INCOME_WHT":
+            used = sum(
+                (
+                    r.taxable_base
+                    for r in line.withholdings.filter(
+                        record__status="POSTED", authorization__treatment="INCOME_WHT"
+                    )
+                ),
+                Decimal(0),
+            )
+            credited_net = sum(
+                (
+                    r.net
+                    for r in m.CreditNoteLine.objects.filter(
+                        line=line, credit__record__status="POSTED"
+                    )
+                ),
+                Decimal(0),
+            )
+            check(
+                detail.rate == auth.rate
+                and value
+                == amount(detail.taxable_base * detail.rate / 100, record.currency),
+                "Withholding authorization changed; revise the draft.",
+            )
+            check(
+                used + detail.taxable_base <= line.net - credited_net,
+                "Withholding base exceeds remaining net goods value.",
+            )
+            check(
+                auth.credit_account_id
+                and auth.credit_account.active
+                and auth.credit_account.classification == "ASSET",
+                "Tax credit asset account is not configured.",
+            )
+            row(auth.credit_account, value)
+        elif policy.treatment == "CLIENT_REMITTANCE":
             check(
                 value
                 <= line.tax - tax_collected(line) - tax_withheld(line) - credited(line),

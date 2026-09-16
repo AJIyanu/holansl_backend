@@ -1,10 +1,10 @@
 # Ledger application
 
-Status: backend implemented and application migrations applied on 2026-09-15;
-Accounts configuration and frontend remain pending. Source reviewed 2026-09-15. The report name is
-**Reconciliation and Statement**. This page describes implemented contracts;
-the [design](../design/LEDGER_BACKEND.md) also records future capabilities and
-earlier assumptions. Source: [models](../../ledger/models/),
+Status: core backend migrated on 2026-09-15; Accounts frontend implemented on
+2026-09-16. New client-rate and cash-holder migrations 0010–0012 await application
+rollout approval. The report name is **Reconciliation and Statement**.
+This page describes implemented contracts and pending deployment requirements.
+Source: [models](../../ledger/models/),
 [services](../../ledger/services/), [serializers](../../ledger/serializers.py).
 
 ## Accounting and access
@@ -243,3 +243,47 @@ Markdown links passed. Global schema generation still reports existing serialize
 inference diagnostics in accounts/notifications; none originate in ledger. The
 whole-project Ruff run also found pre-existing issues outside changed feature code.
 Accounts setup, frontend work and live provider delivery remain separate steps.
+
+
+## Accounts frontend and client rates — 2026-09-16
+
+The companion frontend now implements `/dashboard/ledger/[[...segments]]` with
+server access checks and the authenticated `/api/ledger/[...path]` proxy. Screens
+include approvals/procurement submissions, invoices, receipts, payments, expenses,
+advances, withholding, journals, account books, Reconciliation and Statement,
+analytics, document generation/upload and settings. Existing staff/role screens
+remain the permission-management authority.
+
+New migrations 0010–0012 are additive and must be applied before this frontend is
+used with these backend changes. They add client withholding treatment/rate/credit
+account, deduction rate/net-base snapshots and optional cash-account custodian.
+They preserve existing VAT authorizations and do not post balances or approve clients.
+
+Client authorization accepts `treatment` (`VAT` for compatibility, or `INCOME_WHT`),
+`rate` (business default **2.5**, not a statutory claim), and `credit_account` (required
+active asset for income WHT). Managers use the existing authorize permission and
+full scope. Rate changes use revoke/new authorization with dates, evidence and
+reason; old posted rates stay attached to their deductions. For `INCOME_WHT`, a
+withholding write optionally supplies `taxable_base` (defaults to invoice line net),
+and `amount` must equal that base times the approved percentage, currency-rounded.
+Posting rejects expired/revoked authorization, changed rates, duplicate/excess bases
+and deductions above invoice outstanding. Income WHT debits the credit asset, never
+VAT payable. Tax reports expose income credits separately in `income_wht`.
+
+`GET journals/` accepts `date_from`, `date_to`, currency code, account-currency UUID,
+source `kind` and reference `search`; results include account names/codes.
+Financial lists also accept dates/currency and receipts/payments accept `cash_account`.
+`GET account-book/` requires account-currency UUID, currency and date range and returns
+paginated rows with running debit-positive balances plus exact opening/closing totals.
+`GET analytics/` requires currency/date range and aggregates all posted journal lines,
+not list pages. Both require journal view and full financial scope. Monthly income
+reflects acceptance recognition; currencies are never summed or converted.
+
+`GET lookups/?kind=...` provides paginated, permission-checked form choices, including
+scoped procurement references. Cash-account setup/edit accepts optional active staff
+`custodian`. Accounting identifiers and currency precision remain immutable after
+creation; descriptive currency fields and active status can be edited with a reason.
+
+Outstanding operational step: review/apply pending migrations, configure the income
+WHT credit account/type, and verify the rendered authenticated workflows with staff.
+No application migration or live financial posting is implied by source-code checks.

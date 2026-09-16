@@ -50,6 +50,23 @@ class TaxPolicyVersion(Record):
 
 
 class ClientWithholdingAuthorization(Record):
+    treatment = models.CharField(
+        max_length=20,
+        default="VAT",
+        choices=[
+            ("VAT", "VAT withheld by client"),
+            ("INCOME_WHT", "Income tax credit"),
+        ],
+    )
+    rate = models.DecimalField(max_digits=7, decimal_places=4, default="2.5")
+    credit_account = models.ForeignKey(
+        "ledger.LedgerAccount",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="withholding_authorizations",
+    )
+
     party = models.ForeignKey("crm.Party", on_delete=models.PROTECT)
     tax_type = models.ForeignKey(TaxType, on_delete=models.PROTECT)
     effective_from = models.DateField()
@@ -70,11 +87,22 @@ class ClientWithholdingAuthorization(Record):
                 condition=Q(effective_to__isnull=True)
                 | Q(effective_to__gte=F("effective_from")),
                 name="ledger_auth_dates",
-            )
+            ),
+            models.CheckConstraint(
+                condition=Q(rate__gt=0, rate__lte=100), name="ledger_auth_rate"
+            ),
+            models.CheckConstraint(
+                condition=Q(treatment="VAT")
+                | Q(treatment="INCOME_WHT", credit_account__isnull=False),
+                name="ledger_auth_credit",
+            ),
         ]
 
 
 class WithholdingRecord(Record):
+    rate = models.DecimalField(max_digits=7, decimal_places=4, null=True)
+    taxable_base = money(default=0)
+
     record = models.OneToOneField(
         "ledger.FinancialRecord", on_delete=models.PROTECT, related_name="withholding"
     )

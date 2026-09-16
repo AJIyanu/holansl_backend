@@ -363,9 +363,12 @@ def create(user, kind, data):
             "Withholding must use its invoice posting policy.",
         )
         check(
-            line.tax_policy_id
-            and auth.tax_type_id == line.tax_policy.tax_type_id
-            and auth.party_id == record.party_id,
+            auth.party_id == record.party_id
+            and (
+                auth.treatment == "INCOME_WHT"
+                or line.tax_policy_id
+                and auth.tax_type_id == line.tax_policy.tax_type_id
+            ),
             "Authorization and invoice tax type/client differ.",
         )
         check(
@@ -374,12 +377,28 @@ def create(user, kind, data):
         )
         total = amount(data["amount"], record.currency)
         check(total > 0, "Deduction must be positive.")
+        withholding_base = (
+            amount(data.get("taxable_base", line.net), record.currency)
+            if auth.treatment == "INCOME_WHT"
+            else amount(0)
+        )
+        if auth.treatment == "INCOME_WHT":
+            check(
+                0 < withholding_base <= line.net,
+                "Withholding base must be within the line net value, excluding VAT.",
+            )
+            check(
+                total == amount(withholding_base * auth.rate / 100, record.currency),
+                "Deduction must equal the approved client rate applied to the net base.",
+            )
         make(
             m.WithholdingRecord,
             user,
             record=record,
             line=line,
             authorization=auth,
+            rate=auth.rate if auth.treatment == "INCOME_WHT" else None,
+            taxable_base=withholding_base,
             certificate_reference=data["certificate_reference"],
         )
     elif kind == "TAX_REMITTANCE":

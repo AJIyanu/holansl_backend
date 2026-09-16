@@ -28,10 +28,27 @@ def authorize(user, data):
         qs = qs.filter(effective_from__lte=end)
     check(not qs.exists(), "Overlapping withholding authorization exists.")
     check(data["reason"].strip(), "Authorization reason is required.")
+    treatment = data.get("treatment", "VAT")
+    rate = Decimal(str(data.get("rate", "2.5")))
+    check(
+        treatment in {"VAT", "INCOME_WHT"} and 0 < rate <= 100,
+        "Invalid withholding treatment or rate.",
+    )
+    credit = data.get("credit_account")
+    check(
+        treatment != "INCOME_WHT"
+        or credit
+        and credit.active
+        and credit.classification == "ASSET",
+        "Income WHT needs an active tax credit asset account.",
+    )
     doc = evidence(user, data["evidence"], data["party"])
     obj = make(
         m.ClientWithholdingAuthorization,
         user,
+        treatment=treatment,
+        rate=rate,
+        credit_account=credit,
         party=data["party"],
         tax_type=data["tax_type"],
         effective_from=start,
@@ -130,6 +147,7 @@ def report(user, currency, date_from, date_to):
         deduction_movements = (
             m.ClientMovement.objects.filter(
                 source__withholding__line__tax_policy=policy,
+                source__withholding__authorization__treatment="VAT",
                 account__currency=currency,
                 date__range=(date_from, date_to),
             )
@@ -173,4 +191,18 @@ def report(user, currency, date_from, date_to):
         date_from=str(date_from),
         date_to=str(date_to),
         results=rows,
+        income_wht=[
+            dict(
+                date=str(r.date),
+                client=str(r.source.party_id),
+                reference=r.source.withholding.certificate_reference,
+                amount=str(r.credit - r.debit),
+                rate=str(r.source.withholding.rate),
+            )
+            for r in m.ClientMovement.objects.filter(
+                source__withholding__authorization__treatment="INCOME_WHT",
+                account__currency=currency,
+                date__range=(date_from, date_to),
+            ).select_related("source__withholding")
+        ],
     )

@@ -51,6 +51,14 @@ class AccountCurrency(Record):
 
 
 class CashAccount(Record):
+    custodian = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="ledger_cash_accounts",
+    )
+
     name = models.CharField(max_length=150)
     kind = models.CharField(max_length=8, choices=[("BANK", "Bank"), ("CASH", "Cash")])
     account = models.OneToOneField(AccountCurrency, on_delete=models.PROTECT)

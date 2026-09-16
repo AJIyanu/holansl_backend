@@ -69,9 +69,9 @@ def tax_withheld(line):
     return sum(
         (
             r.record.amount
-            for r in line.withholdings.filter(record__status="POSTED").select_related(
-                "record"
-            )
+            for r in line.withholdings.filter(
+                record__status="POSTED", authorization__treatment="VAT"
+            ).select_related("record")
         ),
         Decimal(0),
     )

@@ -517,3 +517,14 @@ only when the new models exist; do not remove it just to claim readiness.
 This specification retains the approved design baseline. The implemented API
 documents resolved policies and current boundaries; frontend, deployment and live
 financial activity require their own authorized work.
+
+
+## Approved frontend amendment — 2026-09-16
+
+User authorized the Accounts frontend and necessary backend changes. Client-specific
+income WHT defaults to 2.5% as a configurable business authorization, distinct from
+VAT; no automatic client eligibility. Settings includes adding accounts/currencies,
+editing descriptive currency details, cash-holder assignment, financial periods and
+permission links. Journal/account books, permission-controlled analytics, procurement
+approval inbox, expenses and bank-style Reconciliation and Statement are in scope.
+See the current ledger app documentation for delivered contracts and rollout limits.

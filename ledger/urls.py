@@ -62,5 +62,8 @@ urlpatterns = [
         ("recognize-revenue", "post", "recognize_revenue"),
         ("tax-reports", "get", "tax_reports"),
         ("trial-balance", "get", "trial_balance"),
+        ("analytics", "get", "analytics"),
+        ("account-book", "get", "account_book"),
+        ("lookups", "get", "lookups"),
     ]
 ] + router.urls

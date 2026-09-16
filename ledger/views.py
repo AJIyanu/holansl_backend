@@ -148,6 +148,17 @@ class FinancialView(BaseView):
         ]:
             if request.query_params.get(param):
                 qs = qs.filter(**{field: request.query_params[param]})
+        qs = report_filter(
+            qs, request, date_field="date", currency_field="currency__code"
+        )
+        if request.query_params.get("cash_account") and self.kind in {
+            "RECEIPT",
+            "PAYMENT",
+        }:
+            account = z.serializers.UUIDField().run_validation(
+                request.query_params["cash_account"]
+            )
+            qs = qs.filter(**{self.kind.lower() + "__cash_account_id": account})
         return self.paginate(
             qs, lambda obj: {**plain(obj), "currency": obj.currency.code}
         )
@@ -386,7 +397,23 @@ class SetupView(BaseView):
 
     def list(self, request):
         require(request.user, "view_" + self.model._meta.model_name)
-        return self.paginate(self.model.objects.all())
+
+        def output(obj):
+            data = plain(obj)
+            if self.model is m.AccountCurrency:
+                data.update(account_name=obj.account.name, currency=obj.currency.code)
+            if self.model is m.CashAccount:
+                data.update(
+                    currency=obj.account.currency.code,
+                    custodian_name=(
+                        obj.custodian.get_full_name() or obj.custodian.username
+                    )
+                    if obj.custodian
+                    else "Unassigned",
+                )
+            return data
+
+        return self.paginate(self.model.objects.all(), output)
 
     def retrieve(self, request, pk=None):
         require(request.user, "view_" + self.model._meta.model_name)
@@ -429,6 +456,14 @@ class YearView(SetupView):
 
 
 class PeriodView(BaseView):
+    def retrieve(self, request, pk=None):
+        require(request.user, "view_accountingperiod")
+        try:
+            obj = m.AccountingPeriod.objects.get(pk=pk)
+        except m.AccountingPeriod.DoesNotExist:
+            raise NotFound() from None
+        return Response(plain(obj))
+
     def list(self, request):
         require(request.user, "view_accountingperiod")
         return self.paginate(m.AccountingPeriod.objects.all())
@@ -581,9 +616,20 @@ class StatementView(BaseView):
 
 
 class AuthorizationView(BaseView):
+    def retrieve(self, request, pk=None):
+        full_scope(request.user, "view_clientwithholdingauthorization")
+        try:
+            obj = m.ClientWithholdingAuthorization.objects.get(pk=pk)
+        except m.ClientWithholdingAuthorization.DoesNotExist:
+            raise NotFound() from None
+        return Response(plain(obj))
+
     def list(self, request):
         full_scope(request.user, "view_clientwithholdingauthorization")
-        return self.paginate(m.ClientWithholdingAuthorization.objects.all())
+        return self.paginate(
+            m.ClientWithholdingAuthorization.objects.select_related("party"),
+            lambda x: {**plain(x), "client_name": x.party.display_name},
+        )
 
     @extend_schema(request=z.AuthorizationInput, responses=OpenApiTypes.OBJECT)
     def create(self, request):
@@ -623,7 +669,23 @@ class ApprovalView(BaseView):
         scope = Q(revision__record__kind__in=kinds)
         if request.user.has_perm("ledger.approve_quotation"):
             scope |= Q(quotation_revision__isnull=False)
-        return self.paginate(m.ApprovalRequest.objects.filter(scope))
+        qs = m.ApprovalRequest.objects.filter(scope).select_related(
+            "revision__record", "quotation_revision__quotation"
+        )
+        if request.query_params.get("status"):
+            qs = qs.filter(status=request.query_params["status"])
+
+        def output(obj):
+            record = obj.revision.record if obj.revision_id else None
+            return {
+                **plain(obj),
+                "record": record_data(record) if record else None,
+                "quotation_revision": str(obj.quotation_revision_id)
+                if obj.quotation_revision_id
+                else None,
+            }
+
+        return self.paginate(qs, output)
 
     def decision(self, request, pk, approved):
         full_scope(request.user, "view_approvalrequest")
@@ -675,9 +737,20 @@ class ApprovalView(BaseView):
 
 
 class SubmissionView(BaseView):
+    def retrieve(self, request, pk=None):
+        full_scope(request.user, "view_financesubmission")
+        try:
+            obj = m.FinanceSubmission.objects.select_related("source").get(pk=pk)
+        except m.FinanceSubmission.DoesNotExist:
+            raise NotFound() from None
+        return Response({**plain(obj), "source": plain(obj.source)})
+
     def list(self, request):
         full_scope(request.user, "view_financesubmission")
-        return self.paginate(m.FinanceSubmission.objects.all())
+        return self.paginate(
+            m.FinanceSubmission.objects.select_related("source"),
+            lambda x: {**plain(x), "source": plain(x.source)},
+        )
 
     @extend_schema(request=z.LinkSubmissionInput, responses=OpenApiTypes.OBJECT)
     @action(detail=True, methods=["post"])
@@ -721,7 +794,35 @@ class SubmissionView(BaseView):
         return self.mutate(z.LinkSubmissionInput, callback)
 
 
+def document_queryset(user):
+    require(user, "view_ledgerdocument")
+    from django.db.models import Q
+
+    kinds = [k for k, v in m.RESOURCE.items() if user.has_perm("ledger.view_" + v)]
+    visible = visible_records(user).filter(kind__in=kinds)
+    scope = Q(record__in=visible) | Q(record__isnull=True, created_by=user)
+    if user.has_perm("ledger.viewall_financialrecord"):
+        scope |= Q(record__isnull=True)
+    qs = m.LedgerDocument.objects.filter(scope)
+    if not (
+        user.has_perm("ledger.viewall_financialrecord")
+        and user.has_perm("ledger.view_clientstatement")
+    ):
+        qs = qs.filter(statement__isnull=True)
+    return qs
+
+
 class DocumentView(BaseView):
+    def list(self, request):
+        return self.paginate(document_queryset(request.user))
+
+    def retrieve(self, request, pk=None):
+        try:
+            obj = document_queryset(request.user).get(pk=pk)
+        except m.LedgerDocument.DoesNotExist:
+            raise NotFound() from None
+        return Response(plain(obj))
+
     @extend_schema(request=z.DocumentInput, responses=OpenApiTypes.OBJECT)
     def create(self, request):
         require(request.user, "add_ledgerdocument")
@@ -752,14 +853,68 @@ class DocumentView(BaseView):
         return response
 
 
+def report_filter(qs, request, date_field="date", currency_field="currency__code"):
+    fields = {
+        "date_from": z.serializers.DateField(required=False),
+        "date_to": z.serializers.DateField(required=False),
+        "currency": z.serializers.CharField(required=False),
+    }
+    parsed = type("ReportFilter", (z.StrictSerializer,), dict(fields))(
+        data={k: v for k, v in request.query_params.items() if k in fields}
+    )
+    parsed.is_valid(raise_exception=True)
+    d = parsed.validated_data
+    check(
+        not d.get("date_from")
+        or not d.get("date_to")
+        or d["date_from"] <= d["date_to"],
+        "Invalid date range.",
+    )
+    for key, suffix in [("date_from", "gte"), ("date_to", "lte")]:
+        if d.get(key):
+            qs = qs.filter(**{date_field + "__" + suffix: d[key]})
+    if d.get("currency"):
+        qs = qs.filter(**{currency_field: d["currency"]})
+    return qs
+
+
+def journal_data(obj):
+    return {
+        **plain(obj),
+        "currency": obj.currency.code,
+        "reference": obj.source.reference,
+        "description": obj.source.description,
+        "source_kind": obj.source.kind,
+        "lines": [
+            {
+                **plain(x),
+                "account_name": x.account.account.name,
+                "account_code": x.account.account.code,
+            }
+            for x in obj.lines.all()
+        ],
+    }
+
+
 class JournalView(BaseView):
     def list(self, request):
         full_scope(request.user, "view_journalentry")
+        qs = report_filter(
+            m.JournalEntry.objects.filter(posted_at__isnull=False), request
+        )
+        account = request.query_params.get("account")
+        if account:
+            parsed = z.serializers.UUIDField().run_validation(account)
+            qs = qs.filter(lines__account_id=parsed).distinct()
+        if request.query_params.get("kind"):
+            qs = qs.filter(source__kind=request.query_params["kind"])
+        if request.query_params.get("search"):
+            qs = qs.filter(source__reference__icontains=request.query_params["search"])
         return self.paginate(
-            m.JournalEntry.objects.filter(posted_at__isnull=False).prefetch_related(
-                "lines"
+            qs.select_related("currency", "source").prefetch_related(
+                "lines__account__account"
             ),
-            lambda obj: {**plain(obj), "lines": [plain(x) for x in obj.lines.all()]},
+            journal_data,
         )
 
     def retrieve(self, request, pk=None):
@@ -768,7 +923,7 @@ class JournalView(BaseView):
             obj = m.JournalEntry.objects.get(pk=pk, posted_at__isnull=False)
         except m.JournalEntry.DoesNotExist:
             raise NotFound() from None
-        return Response({**plain(obj), "lines": [plain(x) for x in obj.lines.all()]})
+        return Response(journal_data(obj))
 
 
 class UtilityView(BaseView):
@@ -778,6 +933,7 @@ class UtilityView(BaseView):
             {
                 "ledger": True,
                 "primary_currency": "NGN",
+                "default_wht_rate": "2.5",
                 "currencies": list(
                     m.Currency.objects.filter(active=True).values_list(
                         "code", flat=True
@@ -869,3 +1025,388 @@ class UtilityView(BaseView):
                 }
             )
         )
+
+    @action(detail=False, methods=["get"])
+    def analytics(self, request):
+        full_scope(request.user, "view_journalentry")
+        parsed = z.TaxReportInput(data=request.query_params)
+        parsed.is_valid(raise_exception=True)
+        d = parsed.validated_data
+        check(d["date_from"] <= d["date_to"], "Invalid date range.")
+        from django.db.models import Sum
+        from django.db.models.functions import TruncMonth
+
+        all_lines = m.JournalLine.objects.filter(
+            entry__posted_at__isnull=False,
+            entry__currency=d["currency"],
+            entry__date__lte=d["date_to"],
+        )
+        lines = all_lines.filter(entry__date__gte=d["date_from"])
+        balances = list(
+            all_lines.values(
+                "account_id",
+                "account__account__name",
+                "account__account__classification",
+            ).annotate(debit=Sum("debit"), credit=Sum("credit"))
+        )
+        for row in balances:
+            value = row["debit"] - row["credit"]
+            row["balance"] = (
+                value
+                if row["account__account__classification"] in {"ASSET", "EXPENSE"}
+                else -value
+            )
+        monthly = list(
+            lines.annotate(month=TruncMonth("entry__date"))
+            .values("month", "account__account__classification")
+            .annotate(debit=Sum("debit"), credit=Sum("credit"))
+            .order_by("month")
+        )
+        return Response(
+            primitive(
+                {
+                    "currency": d["currency"].code,
+                    "date_from": d["date_from"],
+                    "date_to": d["date_to"],
+                    "balances": balances,
+                    "monthly": monthly,
+                }
+            )
+        )
+
+    @action(detail=False, methods=["get"])
+    def lookups(self, request):
+        kind = request.query_params.get("kind", "")
+        from crm.models import Party
+        from django.contrib.auth import get_user_model
+        from rest_framework.exceptions import PermissionDenied
+        from django.db.models import Q
+
+        if kind == "parties":
+            if not request.user.has_perm("crm.view_party"):
+                raise PermissionDenied("Client directory permission required.")
+            qs = Party.objects.all()
+            if request.query_params.get("search"):
+                qs = qs.filter(display_name__icontains=request.query_params["search"])
+            return self.paginate(
+                qs, lambda x: {"id": str(x.pk), "label": x.display_name}
+            )
+        if kind == "requests":
+            if not request.user.has_perm("procurement.view_procurementrequest"):
+                raise PermissionDenied("Procurement request permission required.")
+            from procurement.services import visible_requests
+
+            qs = visible_requests(request.user)
+            if request.query_params.get("search"):
+                qs = qs.filter(
+                    Q(number__icontains=request.query_params["search"])
+                    | Q(client_name__icontains=request.query_params["search"])
+                )
+            return self.paginate(
+                qs,
+                lambda x: {"id": str(x.pk), "label": x.number + " — " + x.client_name},
+            )
+        if kind in {"request-items", "order-lines"}:
+            from procurement import models as pm
+            from procurement.services import visible_requests
+
+            permission = (
+                "procurement.view_requestitem"
+                if kind == "request-items"
+                else "procurement.view_clientpurchaseorder"
+            )
+            if not request.user.has_perm(permission):
+                raise PermissionDenied("Procurement document permission required.")
+            qs = (
+                pm.RequestItem.objects.filter(
+                    request__in=visible_requests(request.user)
+                )
+                if kind == "request-items"
+                else pm.ClientPurchaseOrderLine.objects.filter(
+                    order__request__in=visible_requests(request.user)
+                )
+            )
+            if request.query_params.get("request"):
+                qs = qs.filter(
+                    **{
+                        "request_id"
+                        if kind == "request-items"
+                        else "order__request_id": request.query_params["request"]
+                    }
+                )
+            if request.query_params.get("search"):
+                qs = qs.filter(
+                    **{
+                        "description__icontains"
+                        if kind == "request-items"
+                        else "item_description__icontains": request.query_params[
+                            "search"
+                        ]
+                    }
+                )
+            return self.paginate(
+                qs,
+                lambda x: {
+                    "id": str(x.pk),
+                    "label": x.description
+                    if kind == "request-items"
+                    else x.item_description or str(x.pk),
+                },
+            )
+        if kind == "staff":
+            if not request.user.has_perm("accounts.view_user"):
+                raise PermissionDenied("Staff directory permission required.")
+            qs = get_user_model().objects.filter(is_active=True, is_staff=True)
+            if request.query_params.get("search"):
+                qs = qs.filter(username__icontains=request.query_params["search"])
+            return self.paginate(
+                qs,
+                lambda x: {"id": str(x.pk), "label": x.get_full_name() or x.username},
+            )
+        models = {
+            "currencies": m.Currency,
+            "currency-ids": m.Currency,
+            "accounts": m.LedgerAccount,
+            "account-currencies": m.AccountCurrency,
+            "cash-accounts": m.CashAccount,
+            "posting-policies": m.PostingPolicyVersion,
+            "tax-types": m.TaxType,
+            "tax-policies": m.TaxPolicyVersion,
+            "documents": m.LedgerDocument,
+            "withholding-authorizations": m.ClientWithholdingAuthorization,
+        }
+        if kind in models:
+            model = models[kind]
+            require(request.user, "view_" + model._meta.model_name)
+            qs = (
+                document_queryset(request.user)
+                if kind == "documents"
+                else model.objects.all()
+            )
+            if kind == "withholding-authorizations":
+                full_scope(request.user, "view_" + model._meta.model_name)
+            names = {f.name for f in model._meta.fields}
+            query = request.query_params.get("search")
+            if query:
+                filters = Q()
+                for name in ["name", "code", "filename", "reason"]:
+                    if name in names:
+                        filters |= Q(**{name + "__icontains": query})
+                qs = qs.filter(filters)
+            if "active" in names:
+                qs = qs.filter(active=True)
+
+            def output(x):
+                label = (
+                    getattr(x, "name", None)
+                    or getattr(x, "filename", None)
+                    or str(x.pk)
+                )
+                if kind == "currencies":
+                    return {"id": x.code, "label": x.code + " — " + x.name}
+                if kind == "account-currencies":
+                    label = (
+                        x.account.code
+                        + " — "
+                        + x.account.name
+                        + " ("
+                        + x.currency.code
+                        + ")"
+                    )
+                if kind == "cash-accounts":
+                    label = x.name + " (" + x.account.currency.code + ")"
+                if kind == "tax-policies":
+                    label = x.tax_type.name + " — " + str(x.rate) + "%"
+                if kind == "withholding-authorizations":
+                    label = (
+                        x.party.display_name
+                        + " — "
+                        + x.treatment
+                        + " "
+                        + str(x.rate)
+                        + "%"
+                    )
+                return {"id": str(x.pk), "label": label}
+
+            return self.paginate(qs, output)
+        if kind == "financial-records":
+            kinds = [
+                k
+                for k, v in m.RESOURCE.items()
+                if request.user.has_perm("ledger.view_" + v)
+            ]
+            qs = (
+                visible_records(request.user)
+                .filter(kind__in=kinds)
+                .select_related("currency")
+            )
+            if request.query_params.get("search"):
+                qs = qs.filter(
+                    Q(reference__icontains=request.query_params["search"])
+                    | Q(party_name__icontains=request.query_params["search"])
+                )
+            return self.paginate(
+                qs,
+                lambda x: {
+                    "id": str(x.pk),
+                    "label": x.kind
+                    + " — "
+                    + (x.reference or x.description)
+                    + " ("
+                    + x.currency.code
+                    + ")",
+                },
+            )
+        if kind == "invoices-for-allocation":
+            require(request.user, "view_invoice")
+            qs = m.Invoice.objects.filter(
+                record__in=visible_records(request.user).filter(
+                    kind="INVOICE", status="POSTED"
+                )
+            ).select_related("record")
+            if request.query_params.get("search"):
+                qs = qs.filter(
+                    record__reference__icontains=request.query_params["search"]
+                )
+            return self.paginate(
+                qs,
+                lambda x: {
+                    "id": str(x.pk),
+                    "label": x.record.reference + " — " + x.record.party_name,
+                },
+            )
+        if kind == "invoice-lines":
+            require(request.user, "view_invoice")
+            qs = m.InvoiceLine.objects.filter(
+                invoice__record__in=visible_records(request.user).filter(
+                    kind="INVOICE", status="POSTED"
+                )
+            ).select_related("invoice__record")
+            if request.query_params.get("request"):
+                qs = qs.filter(
+                    invoice__record__request_id=request.query_params["request"]
+                )
+            if request.query_params.get("search"):
+                qs = qs.filter(description__icontains=request.query_params["search"])
+            return self.paginate(
+                qs,
+                lambda x: {
+                    "id": str(x.pk),
+                    "label": x.invoice.record.reference + " — " + x.description,
+                    "net": str(x.net),
+                },
+            )
+        if kind in {
+            "invoices",
+            "receipts",
+            "payments",
+            "expenses",
+            "advances",
+            "tax-remittances",
+            "supplier-bills",
+            "advance-clearances",
+        }:
+            kinds = {
+                "invoices": "INVOICE",
+                "receipts": "RECEIPT",
+                "payments": "PAYMENT",
+                "expenses": "EXPENSE",
+                "advances": "ADVANCE",
+                "tax-remittances": "TAX_REMITTANCE",
+                "supplier-bills": "SUPPLIER_BILL",
+                "advance-clearances": "CLEARANCE",
+            }
+            k = kinds[kind]
+            require(request.user, "view_" + m.RESOURCE[k])
+            qs = visible_records(request.user).filter(kind=k).select_related("currency")
+            if request.query_params.get("search"):
+                qs = qs.filter(
+                    Q(reference__icontains=request.query_params["search"])
+                    | Q(party_name__icontains=request.query_params["search"])
+                )
+            return self.paginate(
+                qs,
+                lambda x: {
+                    "id": str(x.pk),
+                    "label": (x.reference or x.description or x.kind)
+                    + " — "
+                    + x.party_name
+                    + " ("
+                    + x.currency.code
+                    + ")",
+                },
+            )
+        raise ValidationError("Unknown lookup.")
+
+    @action(detail=False, methods=["get"])
+    def account_book(self, request):
+        full_scope(request.user, "view_journalentry")
+
+        class Input(z.TaxReportInput):
+            account = z.pk(m.AccountCurrency)
+            page = z.serializers.IntegerField(required=False, min_value=1)
+
+        parsed = Input(
+            data={
+                k: v
+                for k, v in request.query_params.items()
+                if k in {"account", "currency", "date_from", "date_to", "page"}
+            }
+        )
+        parsed.is_valid(raise_exception=True)
+        d = parsed.validated_data
+        check(d["date_from"] <= d["date_to"], "Invalid date range.")
+        check(
+            d["account"].currency_id == d["currency"].pk,
+            "Account belongs to a different currency.",
+        )
+        from django.db.models import Sum, F, Window
+
+        qs = m.JournalLine.objects.filter(
+            account=d["account"], entry__posted_at__isnull=False
+        )
+        prior = qs.filter(entry__date__lt=d["date_from"]).aggregate(
+            debit=Sum("debit"), credit=Sum("credit")
+        )
+        opening = (prior["debit"] or Decimal(0)) - (prior["credit"] or Decimal(0))
+        period = qs.filter(entry__date__range=(d["date_from"], d["date_to"]))
+        totals = period.aggregate(debit=Sum("debit"), credit=Sum("credit"))
+        debit = totals["debit"] or Decimal(0)
+        credit = totals["credit"] or Decimal(0)
+        ordered = (
+            period.annotate(
+                running=Window(
+                    Sum(F("debit") - F("credit")),
+                    order_by=[
+                        F("entry__date").asc(),
+                        F("created_at").asc(),
+                        F("id").asc(),
+                    ],
+                )
+            )
+            .order_by("entry__date", "created_at", "id")
+            .select_related("entry__source")
+        )
+        response = self.paginate(
+            ordered,
+            lambda x: {
+                "id": str(x.pk),
+                "date": str(x.entry.date),
+                "reference": x.entry.source.reference,
+                "description": x.entry.source.description,
+                "debit": str(x.debit),
+                "credit": str(x.credit),
+                "running_balance": str(opening + x.running),
+                "journal": str(x.entry_id),
+            },
+        )
+        response.data["summary"] = {
+            "currency": d["currency"].code,
+            "account": d["account"].account.name,
+            "opening_balance": str(opening),
+            "debit": str(debit),
+            "credit": str(credit),
+            "closing_balance": str(opening + debit - credit),
+            "balance_convention": "Debit positive; credit negative",
+        }
+        return response

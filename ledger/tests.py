@@ -515,3 +515,200 @@ class LedgerTests(TestCase):
         )
         with self.assertRaises(ValidationError):
             self.post(record)
+
+    def test_income_withholding_default_and_vat_separation(self):
+        invoice = self.invoice(tax_policy=self.tax_policy)
+        credit = make(
+            m.LedgerAccount,
+            self.user,
+            code="WHT",
+            name="Income tax credits",
+            classification="ASSET",
+        )
+        auth = tax.authorize(
+            self.user,
+            dict(
+                party=self.party,
+                tax_type=self.tax_type,
+                effective_from=date(2026, 1, 1),
+                reason="Manager-approved client rate",
+                evidence=self.doc,
+                treatment="INCOME_WHT",
+                credit_account=credit,
+            ),
+        )
+        self.assertEqual(auth.rate, D("2.5"))
+        deduction = self.post(
+            self.create(
+                "WITHHOLDING",
+                line=invoice.invoice.lines.get(),
+                authorization=auth,
+                certificate_reference="CERT",
+                amount=D("2500"),
+            )
+        )
+        self.assertEqual(deduction.withholding.rate, D("2.5"))
+        self.assertEqual(settlement.tax_withheld(invoice.invoice.lines.get()), 0)
+        self.assertEqual(
+            deduction.journals.get().lines.get(account__account=credit).debit, D("2500")
+        )
+        self.assertFalse(
+            deduction.journals.get()
+            .lines.filter(account__account=self.accounts["TAX"])
+            .exists()
+        )
+        report = tax.report(
+            self.user, self.currency, date(2026, 9, 1), date(2026, 9, 1)
+        )
+        self.assertEqual(D(report["results"][0]["withheld"]), 0)
+        self.assertEqual(D(report["income_wht"][0]["amount"]), D("2500"))
+        with self.assertRaises(ValidationError):
+            self.post(
+                self.create(
+                    "WITHHOLDING",
+                    line=invoice.invoice.lines.get(),
+                    authorization=auth,
+                    certificate_reference="DUP",
+                    amount=D("2500"),
+                )
+            )
+
+    def test_income_withholding_custom_rate_and_wrong_amount(self):
+        invoice = self.invoice()
+        credit = make(
+            m.LedgerAccount,
+            self.user,
+            code="WHT",
+            name="Income tax credits",
+            classification="ASSET",
+        )
+        auth = tax.authorize(
+            self.user,
+            dict(
+                party=self.party,
+                tax_type=self.tax_type,
+                effective_from=date(2026, 1, 1),
+                reason="Custom rate",
+                evidence=self.doc,
+                treatment="INCOME_WHT",
+                credit_account=credit,
+                rate=D("3"),
+            ),
+        )
+        with self.assertRaises(ValidationError):
+            self.create(
+                "WITHHOLDING",
+                line=invoice.invoice.lines.get(),
+                authorization=auth,
+                certificate_reference="BAD",
+                amount=D("2500"),
+            )
+        posted = self.post(
+            self.create(
+                "WITHHOLDING",
+                line=invoice.invoice.lines.get(),
+                authorization=auth,
+                certificate_reference="GOOD",
+                amount=D("1500"),
+                taxable_base=D("50000"),
+            )
+        )
+        self.assertEqual(posted.withholding.rate, D("3"))
+
+    def test_journal_filters_and_analytics_scope(self):
+        self.invoice()
+        response = self.api.get(
+            "/ledger/journals/",
+            {"currency": "USD", "date_from": "2026-09-01", "date_to": "2026-09-30"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 0)
+        response = self.api.get(
+            "/ledger/analytics/",
+            {"currency": "NGN", "date_from": "2026-09-01", "date_to": "2026-09-30"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data["balances"])
+        limited = get_user_model().objects.create_user(
+            username="limited-ledger", password="test-only", is_staff=True
+        )
+        limited.user_permissions.add(
+            Permission.objects.get(
+                content_type__app_label="ledger", codename="view_financialrecord"
+            )
+        )
+        self.api.force_authenticate(limited)
+        self.assertEqual(
+            self.api.get(
+                "/ledger/analytics/",
+                {"currency": "NGN", "date_from": "2026-09-01", "date_to": "2026-09-30"},
+            ).status_code,
+            403,
+        )
+
+    def test_account_book_opening_running_balance_and_currency_guard(self):
+        self.invoice(value="1000")
+        self.invoice(value="2000", date=date(2026, 9, 2))
+        account = m.AccountCurrency.objects.get(
+            account=self.accounts["AR"], currency=self.currency
+        )
+        params = {
+            "account": str(account.pk),
+            "currency": "NGN",
+            "date_from": "2026-09-02",
+            "date_to": "2026-09-02",
+        }
+        response = self.api.get("/ledger/account-book/", params)
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(D(response.data["summary"]["opening_balance"]), D("1000"))
+        self.assertEqual(D(response.data["summary"]["closing_balance"]), D("3000"))
+        self.assertEqual(D(response.data["results"][0]["running_balance"]), D("3000"))
+        self.assertEqual(
+            self.api.get(
+                "/ledger/account-book/", {**params, "currency": "USD"}
+            ).status_code,
+            400,
+        )
+
+    def test_cash_holder_requires_active_staff(self):
+        inactive = get_user_model().objects.create_user(
+            username="inactive-holder", is_staff=True, is_active=False
+        )
+        with self.assertRaises(ValidationError):
+            setup.update_setup(
+                self.user, self.bank, {"custodian": inactive, "reason": "Assignment"}
+            )
+        result = setup.update_setup(
+            self.user,
+            self.bank,
+            {"custodian": self.user, "reason": "Temporary assignment"},
+        )
+        self.assertEqual(result.custodian, self.user)
+
+    def test_document_picker_obeys_own_document_scope(self):
+        limited = get_user_model().objects.create_user(
+            username="document-clerk", is_staff=True
+        )
+        limited.user_permissions.add(
+            *Permission.objects.filter(
+                content_type__app_label="ledger",
+                codename__in=["view_financialrecord", "view_ledgerdocument"],
+            )
+        )
+        own = make(
+            m.LedgerDocument,
+            limited,
+            filename="own.pdf",
+            mime_type="application/pdf",
+            checksum="1" * 64,
+            size_bytes=1,
+            storage_provider="supabase",
+            external_file_id="test",
+        )
+        self.api.force_authenticate(limited)
+        response = self.api.get("/ledger/lookups/", {"kind": "documents"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([x["id"] for x in response.data["results"]], [str(own.pk)])
+        self.assertEqual(
+            self.api.get(f"/ledger/documents/{self.doc.pk}/").status_code, 404
+        )
