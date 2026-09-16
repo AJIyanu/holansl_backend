@@ -1,6 +1,9 @@
 """Transactional business operations. Views never directly edit workflow state."""
 
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
+import logging
+from datetime import datetime, time
+from zoneinfo import ZoneInfo
 
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
@@ -91,6 +94,34 @@ def document(request, doc, category=None):
             check(doc.category == category, f"A {category} document is required.")
 
 
+def expiry_datetime(value):
+    if value is None or isinstance(value, datetime):
+        return value
+    return timezone.make_aware(
+        datetime.combine(value, time.max), ZoneInfo("Africa/Lagos")
+    )
+
+
+def quotation_amounts(row):
+    row.pop("estimated_unit_cost", None)
+    subtotal = row["quantity"] * row["unit_price"]
+    value = Decimal(str(row.pop("discount_value", 0)))
+    mode = row.pop("discount_type", "AMOUNT")
+    check(mode != "PERCENT" or value <= 100, "Percentage discount cannot exceed 100%.")
+    discount = subtotal * value / Decimal(100) if mode == "PERCENT" else value
+    check(discount <= subtotal, "Discount exceeds line value.")
+    tax_rate = Decimal(str(row.pop("tax_rate", "7.5")))
+    tax = (subtotal - discount) * tax_rate / Decimal(100)
+    places = Decimal("0.0001")
+    row.update(
+        discount_type=mode,
+        discount_value=value,
+        discount=discount.quantize(places, rounding=ROUND_HALF_UP),
+        tax_rate=tax_rate,
+        tax=tax.quantize(places, rounding=ROUND_HALF_UP),
+    )
+
+
 def total(qs, field="quantity"):
     return qs.aggregate(n=Sum(field))["n"] or Decimal(0)
 
@@ -122,17 +153,23 @@ def event(item, kind, user, **kwargs):
     ):
         from notifications.services import notify
 
-        notify(
-            recipients=[owner],
-            actor=user,
-            title="Procurement item needs attention",
-            message="An assigned procurement item has a new workflow event.",
-            category="procurement",
-            notification_type=kind.lower(),
-            channels=["DASHBOARD"],
-            source=entry,
-            deduplication_key=f"procurement:{entry.id}",
-        )
+        try:
+            with transaction.atomic():
+                notify(
+                    recipients=[owner],
+                    actor=user,
+                    title="Procurement item needs attention",
+                    message="An assigned procurement item has a new workflow event.",
+                    category="procurement",
+                    notification_type=kind.lower(),
+                    channels=["DASHBOARD"],
+                    source=entry,
+                    deduplication_key=f"procurement:{entry.id}",
+                )
+        except Exception:
+            logging.getLogger(__name__).warning(
+                "Unable to enqueue procurement notification; event_id=%s", entry.id
+            )
     return entry
 
 
@@ -148,40 +185,28 @@ def create_request(user, data, previous_item=None):
             )
         except DjangoValidationError as exc:
             raise ValidationError(exc.message_dict)
-    owner = data.setdefault("owner", user)
-    check(
-        owner.is_active and (owner.is_staff or owner.is_superuser),
-        "Owner must be active staff.",
+    from accounts.models import Department
+
+    department = (
+        Department.objects.filter(name__iexact="Procurement").first()
+        or Department.objects.filter(code="PROC").first()
     )
-    if "department" not in data:
-        data["department"] = getattr(
-            getattr(owner, "profile", None), "department", None
-        )
-    if not user.has_perm("procurement.view_all_procurementrequest"):
-        profile = getattr(user, "profile", None)
-        own_department = getattr(profile, "department_id", None)
-        check(owner == user, "Assigning another owner requires all-request scope.")
-        check(
-            getattr(data.get("department"), "pk", None) == own_department,
-            "Department must match your staff department.",
-        )
+    check(
+        department is not None,
+        "Configure the Procurement department before registering requests.",
+    )
+    check(
+        user.is_active and (user.is_staff or user.is_superuser),
+        "Request owner must be active staff.",
+    )
+    data["owner"] = user
+    data["department"] = department
     not_future(data.get("received_at", timezone.now()))
     obj = make(m.ProcurementRequest, user, client_name=str(data["client"]), **data)
     for row in items:
-        make(m.RequestItem, user, request=obj, previous_item=previous_item, **row)
-    return obj
-
-
-@transaction.atomic
-def submit_request(user, obj):
-    obj = lock_request(obj, user, submitted=False)
-    check(obj.submitted_at is None, "Request has already been submitted.")
-    validate_party(obj.client, "CLIENT")
-    check(obj.items.exists(), "At least one item is required.")
-    obj.submitted_at = timezone.now()
-    obj.version += 1
-    obj.save(update_fields=["submitted_at", "version"])
-    for item in obj.items.all():
+        item = make(
+            m.RequestItem, user, request=obj, previous_item=previous_item, **row
+        )
         event(
             item,
             "REQUEST_RECEIVED",
@@ -190,6 +215,71 @@ def submit_request(user, obj):
             occurred_at=obj.received_at,
         )
     return obj
+
+
+@transaction.atomic
+def submit_request(user, obj, expected_version=None):
+    obj = lock_request(obj, user, submitted=False)
+    check(obj.submitted_at is None, "Request has already been submitted.")
+    check(
+        expected_version is None or obj.version == expected_version,
+        "Request changed; reload and review before submitting.",
+    )
+    validate_party(obj.client, "CLIENT")
+    check(obj.items.exists(), "At least one item is required.")
+    obj.submitted_at = timezone.now()
+    obj.version += 1
+    obj.save(update_fields=["submitted_at", "version"])
+    for item in obj.items.all():
+        if item.events.filter(kind="REQUEST_RECEIVED").exists():
+            continue
+        event(
+            item,
+            "REQUEST_RECEIVED",
+            user,
+            quantity=item.quantity,
+            occurred_at=obj.received_at,
+        )
+    return obj
+
+
+@transaction.atomic
+def edit_item(user, item, data):
+    request = lock_request(item.request, user, submitted=False)
+    check(
+        request.submitted_at is None,
+        "Submitted request items cannot be changed; a controlled amendment is required.",
+    )
+    check(
+        request.version == data["expected_version"],
+        "Request changed; reload before editing.",
+    )
+    item.refresh_from_db()
+    changes = []
+    for field in ["description", "specification", "quantity", "unit", "required_date"]:
+        if field in data and getattr(item, field) != data[field]:
+            changes.append(f"{field}: {getattr(item, field)} → {data[field]}")
+            setattr(item, field, data[field])
+    if changes:
+        item.save(
+            update_fields=[
+                "description",
+                "specification",
+                "quantity",
+                "unit",
+                "required_date",
+            ]
+        )
+        request.version += 1
+        request.save(update_fields=["version"])
+        event(
+            item,
+            "DRAFT_ITEM_UPDATED",
+            user,
+            quantity=item.quantity,
+            reason="; ".join(changes),
+        )
+    return item
 
 
 @transaction.atomic
@@ -226,6 +316,7 @@ def create_offer(user, data, previous=None):
         )
         check(data.get("reason"), "Revision reason is required.")
         data["previous"] = previous
+    data["expires_at"] = expiry_datetime(data.get("expires_at"))
     if data.get("expires_at"):
         check(
             data["expires_at"] > timezone.now(),
@@ -264,6 +355,7 @@ def create_quote(user, data, quotation=None):
     else:
         quotation = make(m.ClientQuotation, user, request=request)
         number = 1
+    data["expires_at"] = expiry_datetime(data.get("expires_at"))
     if data.get("expires_at"):
         check(
             data["expires_at"] > timezone.now(), "New quotations must not be expired."
@@ -292,10 +384,7 @@ def create_quote(user, data, quotation=None):
             or offer.quotation.expires_at > timezone.now(),
             "Supplier offer has expired.",
         )
-        check(
-            row.get("discount", 0) <= row["quantity"] * row["unit_price"],
-            "Discount exceeds line value.",
-        )
+        quotation_amounts(row)
         make(m.ClientQuotationLine, user, revision=revision, **row)
         if number > 1:
             event(
@@ -311,6 +400,9 @@ def create_quote(user, data, quotation=None):
 @transaction.atomic
 def issue_quote(user, revision, data):
     request = lock_request(revision.quotation.request, user)
+    from .document_registry import require_ledger_approval
+
+    require_ledger_approval(revision)
     check(
         not revision.expires_at or revision.expires_at > timezone.now(),
         "Expired quotations must be revised before sending.",
@@ -374,31 +466,70 @@ def create_po(user, data):
     not_future(occurred)
     obj = make(m.ClientPurchaseOrder, user, **data)
     for row in rows:
-        quote = row["quote_line"]
-        same_request(request, quote.item.request)
+        row = dict(row)
+        quote = row.get("quote_line")
+        invoice_id = row.pop("invoice_line", None)
         check(
-            quote.revision.issues.filter(occurred_at__lte=occurred).exists(),
-            "PO must reference a quotation sent before the PO was received.",
+            bool(quote) != bool(invoice_id),
+            "Select exactly one quotation line or approved invoice line.",
         )
-        check(
-            not quote.revision.expires_at or occurred <= quote.revision.expires_at,
-            "PO was received after quotation expiry; reissue the quotation first.",
+        invoice_line = None
+        if quote:
+            same_request(request, quote.item.request)
+            check(
+                quote.revision.issues.filter(occurred_at__lte=occurred).exists(),
+                "PO must reference a quotation sent before receipt.",
+            )
+            check(
+                not quote.revision.expires_at or occurred <= quote.revision.expires_at,
+                "Quotation expired; reissue first.",
+            )
+            check(
+                row["unit_price"] == quote.unit_price,
+                "Changed PO unit prices require a quotation revision.",
+            )
+            item, description, origin = quote.item, quote.description, "QUOTATION"
+        else:
+            from ledger.integrations.procurement import direct_invoice_line
+
+            invoice_line = direct_invoice_line(
+                user, request, invoice_id, row["quantity"], row["unit_price"]
+            )
+            item, description, origin = (
+                invoice_line.item,
+                invoice_line.description,
+                "INVOICE",
+            )
+        line = make(
+            m.ClientPurchaseOrderLine,
+            user,
+            order=obj,
+            item=item,
+            item_description=description,
+            origin=origin,
+            **row,
         )
-        check(
-            row["unit_price"] == quote.unit_price,
-            "Changed PO unit prices require a quotation revision.",
-        )
-        line = make(m.ClientPurchaseOrderLine, user, order=obj, **row)
+        if invoice_line:
+            from ledger.models import InvoiceOrderLink
+
+            make(
+                InvoiceOrderLink,
+                user,
+                line=invoice_line,
+                po_line=line,
+                quantity=line.quantity,
+                evidence=obj.evidence or obj.reference,
+            )
         attempt = make(
             m.FulfilmentAttempt,
             user,
-            item=quote.item,
+            item=item,
             po_line=line,
             quantity=line.quantity,
             strategy="ORIGINAL",
         )
         event(
-            quote.item,
+            item,
             "PURCHASE_ORDER_RECEIVED",
             user,
             quantity=line.quantity,
@@ -509,7 +640,7 @@ def create_delivery(user, data):
     request = lock_request(data["request"], user)
     rows = data.pop("lines")
     contact(request, data["recipient"])
-    document(request, data["waybill"], "WAYBILL")
+    document(request, data.get("waybill"), "WAYBILL")
     obj = make(m.Delivery, user, recipient_name=str(data["recipient"]), **data)
     for row in rows:
         receipt = row["receipt_line"]
@@ -527,6 +658,22 @@ def dispatch(user, obj):
     lock_request(obj.request, user)
     obj.refresh_from_db()
     check(obj.dispatched_at is None, "Delivery has already been dispatched.")
+    check(obj.waybill_id, "Generate or attach a waybill before dispatch.")
+    generated = (
+        m.DocumentAsset.objects.filter(document_id=obj.waybill_id)
+        .select_related("version__register")
+        .first()
+    )
+    if generated:
+        check(not generated.draft, "A draft waybill cannot be used for dispatch.")
+        check(
+            generated.format == "PDF",
+            "Use the complete generated PDF for dispatch, not a single JPG page.",
+        )
+        check(
+            generated.version.register.delivery_id == obj.pk,
+            "The generated waybill belongs to another delivery.",
+        )
     obj.dispatched_at = timezone.now()
     obj.save(update_fields=["dispatched_at"])
     for line in obj.lines.all():
@@ -760,7 +907,7 @@ def create_finance_request(user, data):
         po, delivery = row.get("po_line"), row.get("delivery_line")
         if po:
             check(
-                po.quote_line.item_id == row["item"].id,
+                (po.item_id or po.quote_line.item_id) == row["item"].id,
                 "PO line belongs to another item.",
             )
         if delivery:

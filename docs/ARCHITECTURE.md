@@ -32,8 +32,8 @@ configuration rather than assuming documentation proves live service availabilit
 | crm           | Built                | Shared Party identity, profiles, roles, affiliations, contacts, documents and history        |
 | tasks         | Built                | Personal/staff/department assignments, batches, lifecycle, comments, reminders and activity  |
 | notifications | Built infrastructure | Events, recipients, inbox, preferences/templates, outbox/retries; WhatsApp adapter not built |
-| procurement   | Not implemented      | Requests, sourcing, quote revisions, PO lines, purchasing/delivery and financial requests    |
-| ledger        | Not implemented      | Official invoices, expenses, advances, receipts/payments, allocations and accounting         |
+| procurement   | Backend built and migrated; frontend pending | Requests, sourcing, quote revisions, PO lines, purchasing/delivery and financial requests    |
+| ledger        | Backend built and migrated | Official invoices, expenses, advances, receipts/payments, allocations and accounting         |
 | reports       | Future scope         | Consume stable domain data; no registered app currently                                      |
 
 Accounts supplies identity and permissions. CRM supplies external parties.

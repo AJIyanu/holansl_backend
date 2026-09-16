@@ -203,8 +203,19 @@ class ClientQuotationLine(Record):
     description = models.TextField()
     quantity = models.DecimalField(max_digits=18, decimal_places=4)
     unit_price = models.DecimalField(max_digits=18, decimal_places=4)
-    estimated_unit_cost = models.DecimalField(max_digits=18, decimal_places=4)
+    estimated_unit_cost = models.DecimalField(
+        max_digits=18, decimal_places=4, null=True, blank=True
+    )
+    discount_type = models.CharField(
+        max_length=10,
+        choices=[("AMOUNT", "Amount"), ("PERCENT", "Percentage")],
+        default="AMOUNT",
+    )
+    discount_value = models.DecimalField(max_digits=18, decimal_places=4, default=0)
     discount = models.DecimalField(max_digits=18, decimal_places=4, default=0)
+    tax_rate = models.DecimalField(
+        max_digits=7, decimal_places=4, null=True, default=7.5
+    )
     tax = models.DecimalField(max_digits=18, decimal_places=4, default=0)
     logistics = models.DecimalField(max_digits=18, decimal_places=4, default=0)
     additional_charges = models.DecimalField(max_digits=18, decimal_places=4, default=0)
@@ -215,8 +226,13 @@ class ClientQuotationLine(Record):
                 condition=Q(
                     quantity__gt=0,
                     unit_price__gte=0,
-                    estimated_unit_cost__gte=0,
+                    discount_value__gte=0,
                     discount__gte=0,
+                )
+                & (Q(discount_type="AMOUNT") | Q(discount_value__lte=100))
+                & Q(
+                    tax_rate__gte=0,
+                    tax_rate__lte=100,
                     tax__gte=0,
                     logistics__gte=0,
                     additional_charges__gte=0,
@@ -255,7 +271,20 @@ class ClientPurchaseOrderLine(Record):
         ClientPurchaseOrder, on_delete=models.PROTECT, related_name="lines"
     )
     quote_line = models.ForeignKey(
-        ClientQuotationLine, on_delete=models.PROTECT, related_name="po_lines"
+        ClientQuotationLine,
+        on_delete=models.PROTECT,
+        related_name="po_lines",
+        null=True,
+        blank=True,
+    )
+    item = models.ForeignKey(
+        RequestItem, on_delete=models.PROTECT, null=True, related_name="po_lines"
+    )
+    item_description = models.TextField(blank=True)
+    origin = models.CharField(
+        max_length=12,
+        default="QUOTATION",
+        choices=[("QUOTATION", "Quotation"), ("INVOICE", "Direct invoice")],
     )
     quantity = models.DecimalField(max_digits=18, decimal_places=4)
     unit_price = models.DecimalField(max_digits=18, decimal_places=4)
@@ -263,9 +292,14 @@ class ClientPurchaseOrderLine(Record):
     class Meta(Record.Meta):
         constraints = [
             models.CheckConstraint(
+                condition=Q(origin="QUOTATION", quote_line__isnull=False)
+                | Q(origin="INVOICE", quote_line__isnull=True, item__isnull=False),
+                name="proc_po_line_origin",
+            ),
+            models.CheckConstraint(
                 condition=Q(quantity__gt=0, unit_price__gte=0),
                 name="proc_po_values_valid",
-            )
+            ),
         ]
 
 
@@ -376,7 +410,11 @@ class Delivery(Record):
     recipient_name = models.CharField(max_length=255)
     logistics_details = models.TextField(blank=True)
     waybill = models.ForeignKey(
-        ProcurementDocument, on_delete=models.PROTECT, related_name="waybills"
+        ProcurementDocument,
+        on_delete=models.PROTECT,
+        related_name="waybills",
+        null=True,
+        blank=True,
     )
     dispatched_at = models.DateTimeField(null=True, blank=True)
 
@@ -616,3 +654,128 @@ class Operation(Record):
     key = models.UUIDField(unique=True)
     fingerprint = models.CharField(max_length=64)
     result = models.JSONField()
+
+
+class ClientDocumentCode(Record):
+    """Stable numbering identity; never inferred from mutable client names."""
+
+    client = models.OneToOneField(
+        "crm.Party", on_delete=models.PROTECT, related_name="document_code"
+    )
+    code = models.CharField(max_length=4, unique=True)
+
+    class Meta(Record.Meta):
+        permissions = [("manage_clientdocumentcode", "Manage client document codes")]
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(code__regex=r"^[A-Z]{3,4}$"), name="proc_client_code_format"
+            )
+        ]
+
+
+class DocumentSequence(models.Model):
+    year = models.PositiveIntegerField(primary_key=True)
+    last_serial = models.PositiveBigIntegerField(default=0)
+
+
+class DocumentRegister(Record):
+    class Kind(models.TextChoices):
+        QUOTE = "QT", "Quotation"
+        WAYBILL = "WB", "Waybill"
+        INVOICE = "IN", "Invoice"
+        RECEIPT = "RC", "Receipt"
+
+    request = models.ForeignKey(
+        ProcurementRequest,
+        on_delete=models.PROTECT,
+        related_name="registered_documents",
+        null=True,
+        blank=True,
+    )
+    client = models.ForeignKey(
+        "crm.Party",
+        on_delete=models.PROTECT,
+        null=True,
+        related_name="document_registers",
+    )
+    kind = models.CharField(max_length=2, choices=Kind.choices)
+    client_code = models.CharField(max_length=4)
+    year = models.PositiveIntegerField()
+    serial = models.PositiveBigIntegerField()
+    number = models.CharField(max_length=60, unique=True)
+    quotation = models.OneToOneField(
+        ClientQuotation,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="registered_document",
+    )
+    delivery = models.OneToOneField(
+        Delivery,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="registered_document",
+    )
+
+    class Meta(Record.Meta):
+        constraints = [
+            models.UniqueConstraint(
+                fields=["year", "serial"], name="proc_annual_document_serial"
+            )
+        ]
+        permissions = [
+            ("generate_documentregister", "Generate procurement document files"),
+            ("requestapproval_documentregister", "Request ledger document approval"),
+        ]
+
+
+class DocumentVersion(Record):
+    register = models.ForeignKey(
+        DocumentRegister, on_delete=models.PROTECT, related_name="versions"
+    )
+    revision = models.PositiveIntegerField()
+    quotation_revision = models.OneToOneField(
+        ClientQuotationRevision,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="document_version",
+    )
+    snapshot = models.JSONField()
+    approval_requested_at = models.DateTimeField(null=True, blank=True)
+    approval_requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+    )
+    # Approval is resolved by the future ledger integration, never writable by procurement.
+    ledger_reference = models.CharField(max_length=150, blank=True)
+
+    class Meta(Record.Meta):
+        constraints = [
+            models.UniqueConstraint(
+                fields=["register", "revision"], name="proc_document_revision_unique"
+            )
+        ]
+
+
+class DocumentAsset(Record):
+    version = models.ForeignKey(
+        DocumentVersion, on_delete=models.PROTECT, related_name="assets"
+    )
+    document = models.OneToOneField(ProcurementDocument, on_delete=models.PROTECT)
+    format = models.CharField(max_length=3, choices=[("PDF", "PDF"), ("JPG", "JPG")])
+    page = models.PositiveIntegerField(default=0)
+    draft = models.BooleanField(default=True)
+    template_version = models.CharField(max_length=40)
+
+    class Meta(Record.Meta):
+        constraints = [
+            models.UniqueConstraint(
+                fields=["version", "format", "page", "draft", "template_version"],
+                name="proc_document_asset_unique",
+            )
+        ]

@@ -1,5 +1,1 @@
-"""
-Procurement Django admin placeholder.
-
-No Procurement models are currently registered.
-"""
+"""Procurement writes use scoped service-backed APIs, not generic admin forms."""

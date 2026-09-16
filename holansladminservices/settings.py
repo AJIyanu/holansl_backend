@@ -645,3 +645,11 @@ SUPABASE_STORAGE_REQUEST_TIMEOUT_SECONDS = int(
         "120",
     )
 )
+
+# Document identity: never reuse an obsolete address from a sample layout.
+PROCUREMENT_DOCUMENT_COMPANY = {
+    "address": os.getenv("HOLAN_DOCUMENT_OFFICE_ADDRESS", "").strip(),
+    "website": os.getenv("HOLAN_DOCUMENT_WEBSITE", "www.holansl.com").strip(),
+    "email": os.getenv("HOLAN_DOCUMENT_EMAIL", "operations@holansl.com").strip(),
+    "phone": os.getenv("HOLAN_DOCUMENT_PHONE", "").strip(),
+}

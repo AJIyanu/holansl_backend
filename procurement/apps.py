@@ -4,7 +4,7 @@ from django.apps import AppConfig
 
 
 class ProcurementConfig(AppConfig):
-    """Configure the empty Procurement application placeholder."""
+    """Configure item-level procurement and fulfilment tracking."""
 
     default_auto_field = "django.db.models.BigAutoField"
     name = "procurement"

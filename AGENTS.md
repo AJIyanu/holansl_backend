@@ -29,7 +29,8 @@ documents are standards/specifications, not additional agent entry points.
   supply. This is a Nigerian procurement company's staff-only dashboard, not the
   UK public marine website.
 - Accounts, Party-based CRM, tasks and notifications are built. Preserve their
-  actual routes/contracts. Procurement and ledger remain unimplemented domains.
+  actual routes/contracts. Procurement and ledger backends are built and migrated; consult their app docs
+  for current contracts, configuration and frontend work.
 - New features, feature changes and corrections must be recorded in the affected
   repository's Git-ignored DEVELOPMENT_LOG.local.md with timestamp, functions,
   reason when known and verification. Do not reset or commit local history.

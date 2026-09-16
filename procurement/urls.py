@@ -5,6 +5,9 @@ from . import views as v
 
 router = DefaultRouter()
 for path, view in [
+    ("lookups", v.LookupViewSet),
+    ("document-register", v.DocumentRegisterViewSet),
+    ("document-versions", v.DocumentVersionViewSet),
     ("requests", v.RequestViewSet),
     ("items", v.ItemViewSet),
     ("supplier-quotations", v.OfferViewSet),

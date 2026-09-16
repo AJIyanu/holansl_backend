@@ -36,7 +36,10 @@ class LogoutTests(APITestCase):
 
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.access}")
         protected_response = self.client.get(reverse("current-user"))
-        self.assertEqual(protected_response.status_code, status.HTTP_401_UNAUTHORIZED)
+        # SessionAuthentication is first in the configured authentication chain,
+        # so DRF returns 403 for authentication failures without a challenge header.
+        self.assertEqual(protected_response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(protected_response.data["detail"].code, "token_revoked")
 
         self.client.credentials()
         refresh_response = self.client.post(

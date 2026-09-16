@@ -72,3 +72,6 @@ vine==5.1.0
 wcwidth==0.2.13
 websockets==16.0
 whitenoise==6.11.0
+Pillow==12.3.0
+pypdfium2==5.13.0
+reportlab==5.0.1

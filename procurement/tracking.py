@@ -2,7 +2,7 @@
 
 from decimal import Decimal
 from django.utils import timezone
-from . import models as m, services as s, serializers as z
+from . import models as m, serializers as z
 
 MILESTONES = [
     ("REQUEST_RECEIVED", "Request received"),
@@ -21,36 +21,77 @@ MILESTONES = [
     ("ITEM_REORDERED", "Item reordered by client"),
 ]
 FINANCE = {
-    "available": False,
-    "status": "INTEGRATION_UNAVAILABLE",
-    "reason": "Ledger is not implemented. No official invoice, payment, allocation or refund verification is available.",
+    "available": True,
+    "status": "AVAILABLE",
+    "reason": "Official financial records are managed by the Accounts ledger.",
 }
 
 
-def attempt_summary(attempt):
-    purchases = attempt.purchase_lines.all()
-    receipts = m.GoodsReceiptLine.objects.filter(purchase_line__attempt=attempt)
+def milestone_kinds(code):
+    related = {
+        "REQUEST_RECEIVED": ["DRAFT_ITEM_UPDATED"],
+        "ITEM_SOURCED": ["SOURCING_REOPENED"],
+        "ITEM_PURCHASED_AND_RECEIVED": ["ITEM_PURCHASED"],
+        "ITEM_REJECTED": list(m.RejectionAction.Kind.values),
+        "QUOTATION_REVIEWED": ["QUOTATION_APPROVAL_REQUESTED"],
+        "PAYMENT_RECEIVED": [
+            "PAYMENT_ALLOCATION_RELEASED",
+            "INVOICE_SETTLEMENT_UPDATED",
+        ],
+    }
+    return [code, *related.get(code, [])]
+
+
+def grouped(qs, group, field="quantity"):
+    from django.db.models import Sum
+
+    return {
+        str(row[group]): row["value"]
+        for row in qs.values(group).annotate(value=Sum(field))
+    }
+
+
+def attempt_totals(item):
+    receipts = m.GoodsReceiptLine.objects.filter(purchase_line__attempt__item=item)
     deliveries = m.DeliveryLine.objects.filter(
-        receipt_line__purchase_line__attempt=attempt
+        receipt_line__purchase_line__attempt__item=item
     )
     outcomes = m.DeliveryOutcomeLine.objects.filter(
-        delivery_line__receipt_line__purchase_line__attempt=attempt
+        delivery_line__receipt_line__purchase_line__attempt__item=item
     )
-    closed = m.RejectionAction.objects.filter(
-        rejection__in=outcomes, kind=m.RejectionAction.Kind.CLOSE
-    )
-    replacements = m.FulfilmentAttempt.objects.filter(replaces__in=outcomes)
-    values = {
-        "target": attempt.quantity,
-        "purchased": s.total(purchases),
-        "received": s.total(receipts),
-        "reserved_for_delivery": s.total(deliveries),
-        "dispatched": s.total(deliveries.filter(delivery__dispatched_at__isnull=False)),
-        "accepted": s.total(outcomes, "accepted"),
-        "rejected": s.total(outcomes, "rejected"),
-        "closed_rejected": s.total(closed),
-        "assigned_to_replacements": s.total(replacements),
+    outcome_path = "delivery_line__receipt_line__purchase_line__attempt_id"
+    return {
+        "purchased": grouped(
+            m.SupplierPurchaseLine.objects.filter(attempt__item=item), "attempt_id"
+        ),
+        "received": grouped(receipts, "purchase_line__attempt_id"),
+        "reserved_for_delivery": grouped(
+            deliveries, "receipt_line__purchase_line__attempt_id"
+        ),
+        "dispatched": grouped(
+            deliveries.filter(delivery__dispatched_at__isnull=False),
+            "receipt_line__purchase_line__attempt_id",
+        ),
+        "accepted": grouped(outcomes, outcome_path, "accepted"),
+        "rejected": grouped(outcomes, outcome_path, "rejected"),
+        "closed_rejected": grouped(
+            m.RejectionAction.objects.filter(
+                rejection__in=outcomes, kind=m.RejectionAction.Kind.CLOSE
+            ),
+            "rejection__" + outcome_path,
+        ),
+        "assigned_to_replacements": grouped(
+            m.FulfilmentAttempt.objects.filter(replaces__in=outcomes),
+            "replaces__" + outcome_path,
+        ),
     }
+
+
+def attempt_summary(attempt, totals):
+    values = {
+        key: value.get(str(attempt.id), Decimal(0)) for key, value in totals.items()
+    }
+    values["target"] = attempt.quantity
     values["unresolved_rejected"] = (
         values["rejected"]
         - values["closed_rejected"]
@@ -88,10 +129,48 @@ def attempt_summary(attempt):
     }
 
 
+EVENT_RELATED = [
+    "item",
+    "supplier_offer__quotation",
+    "quote_revision__quotation",
+    "po_line__order",
+    "purchase_line__purchase",
+    "delivery_line__delivery",
+    "outcome_line__outcome",
+    "document",
+]
+
+
 def tracker(item):
-    events = item.events.all()
-    event_types = set(events.values_list("kind", flat=True))
-    attempts = [attempt_summary(a) for a in item.attempts.all().order_by("created_at")]
+    events = item.events.select_related(*EVENT_RELATED)
+    from django.db.models import Count
+
+    counts = dict(
+        events.values("kind").annotate(count=Count("id")).values_list("kind", "count")
+    )
+    event_types = set(counts)
+    latest = {
+        entry.kind: z.READ[m.ItemTrackingEvent](entry).data
+        for entry in events.order_by(
+            "kind", "-occurred_at", "-created_at", "-id"
+        ).distinct("kind")
+    }
+    # Existing registered drafts predate registration-time event creation.
+    latest.setdefault(
+        "REQUEST_RECEIVED",
+        {
+            "id": str(item.id),
+            "kind": "REQUEST_RECEIVED",
+            "created_by_name": item.created_by_name,
+            "occurred_at": item.created_at.isoformat(),
+            "quantity": str(item.quantity),
+            "reason": "Request registered (from the retained registration record).",
+        },
+    )
+    totals = attempt_totals(item)
+    attempts = [
+        attempt_summary(a, totals) for a in item.attempts.all().order_by("created_at")
+    ]
     original_qty = sum(
         (Decimal(a["quantities"]["target"]) for a in attempts if not a["replaces"]),
         Decimal(0),
@@ -107,19 +186,50 @@ def tracker(item):
         "ITEM_REJECTED",
         "ITEM_REORDERED",
     }
+    from ledger.integrations.procurement import item_finance
+
+    finance = item_finance(item)
     milestones = []
     for code, label in MILESTONES:
-        if code in {"INVOICE_SENT", "PAYMENT_RECEIVED"}:
-            state = "INTEGRATION_UNAVAILABLE"
+        if code == "INVOICE_SENT":
+            state = (
+                "RECORDED"
+                if any(row["sent"] for row in finance["invoices"])
+                else "PENDING"
+            )
+        elif code == "PAYMENT_RECEIVED":
+            state = (
+                "RECORDED"
+                if any(
+                    Decimal(row["invoice_cash_allocated"]) > 0
+                    for row in finance["invoices"]
+                )
+                else "PENDING"
+            )
         elif code == "ITEM_REJECTED" and code in event_types:
             state = "EXCEPTION"
         elif code == "ITEM_ACCEPTED" and accepted:
             state = "COMPLETED" if accepted == original_qty else "PARTIAL"
-        elif code in event_types:
+        elif code == "REQUEST_RECEIVED" or code in event_types:
             state = "RECORDED"
         else:
             state = "NOT_APPLICABLE_YET" if code in conditional else "PENDING"
-        milestones.append({"code": code, "label": label, "state": state})
+        milestones.append(
+            {
+                "code": code,
+                "label": label,
+                "state": state,
+                "event_count": sum(
+                    counts.get(kind, 0) for kind in milestone_kinds(code)
+                )
+                or (1 if code == "REQUEST_RECEIVED" else 0),
+                "latest_event": max(
+                    (latest[kind] for kind in milestone_kinds(code) if kind in latest),
+                    key=lambda entry: str(entry["occurred_at"]),
+                    default=None,
+                ),
+            }
+        )
     recent = list(events.order_by("-created_at", "-id")[:100])
     recent.reverse()
     quotes = item.quotation_lines.select_related("revision").all()
@@ -149,7 +259,7 @@ def tracker(item):
         "history_url": f"/procurement/events/?item={item.id}",
         "previous_item": str(item.previous_item_id) if item.previous_item_id else None,
         "reorders": [str(pk) for pk in item.reorders.values_list("id", flat=True)],
-        "finance": FINANCE,
+        "finance": finance,
     }
 
 

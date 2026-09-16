@@ -18,10 +18,18 @@ from rest_framework.exceptions import (
 from rest_framework.permissions import BasePermission
 from rest_framework.response import Response
 from rest_framework.renderers import JSONRenderer
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiTypes
 
 from holansladminservices.pagination import StandardPagination
-from . import models as m, serializers as z, services as s, tracking, documents
+from . import (
+    models as m,
+    serializers as z,
+    services as s,
+    tracking,
+    documents,
+    document_registry,
+    rendering,
+)
 
 
 class Conflict(APIException):
@@ -60,6 +68,9 @@ class ProcurementPermission(BasePermission):
 
 
 PATHS = {
+    m.DocumentRegister: "request",
+    m.DocumentVersion: "register__request",
+    m.DocumentAsset: "version__register__request",
     m.ProcurementRequest: "",
     m.RequestItem: "request",
     m.SupplierQuotation: "request",
@@ -103,6 +114,14 @@ def canonical(value):
     return str(value)
 
 
+@extend_schema(
+    parameters=[
+        OpenApiParameter(
+            "Idempotency-Key", OpenApiTypes.UUID, OpenApiParameter.HEADER, required=True
+        )
+    ],
+    methods=["POST", "PATCH"],
+)
 class ResourceViewSet(
     mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet
 ):
@@ -127,8 +146,22 @@ class ResourceViewSet(
                 )
             }
         )
+        if self.model is m.DocumentRegister:
+            qs = qs.filter(kind__in=["QT", "WB"])
+        elif self.model is m.DocumentVersion:
+            qs = qs.filter(register__kind__in=["QT", "WB"])
+        elif self.model is m.DocumentAsset:
+            qs = qs.filter(version__register__kind__in=["QT", "WB"])
         if path:
             qs = qs.select_related(path)
+        if self.model is m.ItemTrackingEvent:
+            qs = qs.select_related(*tracking.EVENT_RELATED)
+        if self.model is m.ProcurementRequest:
+            qs = qs.select_related("client__document_code")
+        if self.model is m.DocumentRegister:
+            qs = qs.prefetch_related("versions__assets__document")
+        if self.model is m.DocumentVersion:
+            qs = qs.select_related("register").prefetch_related("assets__document")
         # Preload reverse children used by read serializers.
         nested = {
             m.ProcurementRequest: ["items"],
@@ -143,6 +176,21 @@ class ResourceViewSet(
             m.FinanceRequest: ["lines"],
         }
         qs = qs.prefetch_related(*nested.get(self.model, []))
+        reference_prefetch = {
+            m.SupplierQuotation: ["lines__item"],
+            m.ClientPurchaseOrder: ["lines__quote_line"],
+            m.SupplierPurchase: ["lines__attempt__item"],
+            m.GoodsReceipt: ["lines__purchase_line__attempt__item"],
+            m.Delivery: ["lines__receipt_line__purchase_line__attempt__item"],
+            m.DeliveryOutcome: [
+                "lines__delivery_line__receipt_line__purchase_line__attempt__item"
+            ],
+        }
+        qs = qs.prefetch_related(*reference_prefetch.get(self.model, []))
+        if self.model is m.DeliveryOutcomeLine:
+            qs = qs.select_related(
+                "delivery_line__receipt_line__purchase_line__attempt__item"
+            )
         query = self.request.query_params
         root = path + "__" if path else ""
         for param, field in [
@@ -173,6 +221,8 @@ class ResourceViewSet(
                     Q(number__icontains=query["search"])
                     | Q(client_name__icontains=query["search"])
                 )
+        if query.get("rejected") == "true" and self.model is m.DeliveryOutcomeLine:
+            qs = qs.filter(rejected__gt=0)
         if query.get("kind") and self.model in {
             m.ItemTrackingEvent,
             m.RejectionAction,
@@ -180,6 +230,11 @@ class ResourceViewSet(
             m.ProcurementCost,
         }:
             qs = qs.filter(kind=query["kind"])
+        if query.get("milestone") and self.model is m.ItemTrackingEvent:
+            code = query["milestone"]
+            if code not in dict(tracking.MILESTONES):
+                raise ValidationError({"milestone": "Unknown milestone."})
+            qs = qs.filter(kind__in=tracking.milestone_kinds(code))
         return qs
 
     def mutate(self, serializer_class, callback, status=200):
@@ -249,19 +304,48 @@ def resource(name, model, input_serializer=None, service=None):
     if service:
         attrs.update(input_serializer=input_serializer, service=staticmethod(service))
         base = CreateResourceViewSet
+        response_model = (
+            m.ClientQuotationRevision if model is m.ClientQuotation else model
+        )
+
+        def create(self, request, *args, **kwargs):
+            return CreateResourceViewSet.create(self, request, *args, **kwargs)
+
+        attrs["create"] = extend_schema(
+            request=input_serializer, responses={201: z.READ[response_model]}
+        )(create)
     return type(name, (base,), attrs)
 
 
 class RequestViewSet(
     resource("RequestBase", m.ProcurementRequest, z.RequestInput, s.create_request)
 ):
-    action_permissions = {"submit": "change_procurementrequest"}
+    action_permissions = {
+        "submit": "change_procurementrequest",
+        "client_code": "manage_clientdocumentcode",
+    }
 
-    @extend_schema(request=z.EmptyInput, responses=z.READ[m.ProcurementRequest])
+    @extend_schema(request=z.ClientCodeInput, responses=z.READ[m.ProcurementRequest])
+    @action(detail=True, methods=["post"], url_path="client-code")
+    def client_code(self, request, pk=None):
+        obj = self.get_object()
+        return self.mutate(
+            z.ClientCodeInput,
+            lambda data: document_registry.set_client_code(
+                request.user, obj, data["code"]
+            ),
+        )
+
+    @extend_schema(request=z.SubmitRequestInput, responses=z.READ[m.ProcurementRequest])
     @action(detail=True, methods=["post"])
     def submit(self, request, pk=None):
         obj = self.get_object()
-        return self.mutate(z.EmptyInput, lambda _: s.submit_request(request.user, obj))
+        return self.mutate(
+            z.SubmitRequestInput,
+            lambda data: s.submit_request(
+                request.user, obj, data.get("expected_version")
+            ),
+        )
 
     @extend_schema(request=z.RequestEditInput, responses=z.READ[m.ProcurementRequest])
     def partial_update(self, request, *args, **kwargs):
@@ -272,12 +356,21 @@ class RequestViewSet(
 
 
 class ItemViewSet(resource("ItemBase", m.RequestItem)):
+    @extend_schema(request=z.ItemEditInput, responses=z.READ[m.RequestItem])
+    def partial_update(self, request, *args, **kwargs):
+        obj = self.get_object()
+        return self.mutate(
+            z.ItemEditInput, lambda data: s.edit_item(request.user, obj, data)
+        )
+
     action_permissions = {"reorder": "add_procurementrequest"}
 
+    @extend_schema(responses=z.TrackerSerializer)
     @action(detail=True, methods=["get"])
     def tracker(self, request, pk=None):
         return Response(tracking.tracker(self.get_object()))
 
+    @extend_schema(responses=z.AvailableActionSerializer(many=True))
     @action(detail=True, methods=["get"], url_path="available-actions")
     def available_actions(self, request, pk=None):
         return Response(tracking.available_actions(self.get_object(), request.user))
@@ -366,6 +459,7 @@ class OutcomeLineViewSet(resource("OutcomeLineBase", m.DeliveryOutcomeLine)):
 class DocumentViewSet(
     resource("DocumentBase", m.ProcurementDocument, z.DocumentInput, documents.upload)
 ):
+    @extend_schema(responses=OpenApiTypes.BINARY)
     @action(detail=True, methods=["get"])
     def download(self, request, pk=None):
         if not request.user.has_perm("procurement.download_procurementdocument"):
@@ -386,7 +480,10 @@ class DocumentViewSet(
         )
         response = FileResponse(
             file.file_object,
-            as_attachment=True,
+            as_attachment=not (
+                request.query_params.get("preview") == "true"
+                and m.DocumentAsset.objects.filter(document=obj).exists()
+            ),
             filename=obj.filename,
             content_type=obj.mime_type,
         )
@@ -401,14 +498,21 @@ class FinanceViewSet(
     @extend_schema(request=z.EmptyInput)
     @action(detail=True, methods=["post"])
     def submit(self, request, pk=None):
-        self.get_object()
-        raise LedgerUnavailable()
+        obj = self.get_object()
+        from ledger.integrations.procurement import submit_finance
+
+        def submit(_):
+            submit_finance(request.user, obj)
+            return obj
+
+        return self.mutate(z.EmptyInput, submit)
 
 
 class CapabilityViewSet(viewsets.ViewSet):
     permission_classes = [ProcurementPermission]
     model = m.ProcurementRequest
 
+    @extend_schema(responses=z.CapabilitySerializer)
     def list(self, request):
         return Response(
             {
@@ -417,7 +521,14 @@ class CapabilityViewSet(viewsets.ViewSet):
                 "private_documents": True,
                 "client_reorders": True,
                 "automatic_external_sending": False,
-                "numbering": "Unique UUID references; business numbering policy pending.",
+                "numbering": "Hol-[CLIENTCODE]-[QT/WB/IN/RC]-[YEAR]-[ANNUAL SERIAL]",
+                "document_templates": {
+                    "available": True,
+                    "office_address_configured": bool(
+                        rendering.company_profile()["address"]
+                    ),
+                    "reason": "Official documents require a configured current office address; quotations and invoices also require ledger approval.",
+                },
             }
         )
 
@@ -439,3 +550,147 @@ AttemptViewSet = resource("AttemptViewSet", m.FulfilmentAttempt)
 OutcomeViewSet = resource("OutcomeViewSet", m.DeliveryOutcome)
 EventViewSet = resource("EventViewSet", m.ItemTrackingEvent)
 RejectionViewSet = resource("RejectionViewSet", m.RejectionAction)
+
+
+class DocumentRegisterViewSet(resource("DocumentRegisterBase", m.DocumentRegister)):
+    pass
+
+
+class DocumentVersionViewSet(
+    resource(
+        "DocumentVersionBase",
+        m.DocumentVersion,
+        z.PrepareDocumentInput,
+        document_registry.prepare,
+    )
+):
+    action_permissions = {
+        "request_approval": "requestapproval_documentregister",
+        "generate": "generate_documentregister",
+    }
+
+    @extend_schema(request=z.EmptyInput, responses=z.DocumentVersionSerializer)
+    @action(detail=True, methods=["post"], url_path="request-approval")
+    def request_approval(self, request, pk=None):
+        obj = self.get_object()
+        return self.mutate(
+            z.EmptyInput,
+            lambda _: document_registry.request_approval(request.user, obj),
+        )
+
+    @extend_schema(
+        request=z.GenerateDocumentInput, responses=z.DocumentVersionSerializer
+    )
+    @action(detail=True, methods=["post"])
+    def generate(self, request, pk=None):
+        obj = self.get_object()
+        return self.mutate(
+            z.GenerateDocumentInput,
+            lambda data: rendering.generate(request.user, obj, data),
+        )
+
+
+class LookupViewSet(viewsets.ViewSet):
+    """Only lightweight, permission-checked choices for procurement forms."""
+
+    permission_classes = [ProcurementPermission]
+    model = m.ProcurementRequest
+
+    @extend_schema(responses=OpenApiTypes.OBJECT)
+    def list(self, request):
+        kind = request.query_params.get("kind", "clients")
+        search = request.query_params.get("search", "")[:150]
+        user = request.user
+        if kind in {"clients", "suppliers", "contacts"}:
+            if not user.has_perm("crm.view_party"):
+                raise PermissionDenied("CRM directory permission is required.")
+            from crm.models import Party
+
+            qs = Party.objects.filter(status="ACTIVE", is_archived=False)
+            if kind == "contacts":
+                qs = qs.filter(entity_kind="INDIVIDUAL")
+                client = None
+                if request.query_params.get("request"):
+                    try:
+                        parent = s.visible_requests(user).get(
+                            pk=uuid.UUID(request.query_params["request"])
+                        )
+                    except (ValueError, m.ProcurementRequest.DoesNotExist):
+                        raise NotFound()
+                    client = parent.client
+                elif request.query_params.get("client"):
+                    try:
+                        client = Party.objects.get(
+                            pk=uuid.UUID(request.query_params["client"])
+                        )
+                    except (ValueError, Party.DoesNotExist):
+                        raise NotFound()
+                if client:
+                    if client.entity_kind == "INDIVIDUAL":
+                        qs = qs.filter(pk=client.pk)
+                    else:
+                        qs = qs.filter(
+                            organisation_affiliations__organisation=client,
+                            organisation_affiliations__is_current=True,
+                        )
+
+            else:
+                qs = qs.filter(
+                    roles__role="CLIENT" if kind == "clients" else "SUPPLIER",
+                    roles__is_active=True,
+                )
+            qs = (
+                qs.filter(display_name__icontains=search)
+                .order_by("display_name", "id")
+                .distinct()
+            )
+
+            def label(obj):
+                return obj.display_name
+        elif kind == "staff":
+            from django.contrib.auth import get_user_model
+
+            if not user.has_perm("accounts.view_user"):
+                raise PermissionDenied()
+            qs = (
+                get_user_model()
+                .objects.filter(is_active=True, is_staff=True)
+                .filter(
+                    Q(username__icontains=search)
+                    | Q(first_name__icontains=search)
+                    | Q(last_name__icontains=search)
+                )
+                .order_by("username")
+            )
+
+            def label(obj):
+                return obj.get_full_name() or obj.username
+        elif kind == "departments":
+            from accounts.models import Department
+
+            if not user.has_perm("accounts.view_department"):
+                raise PermissionDenied()
+            qs = Department.objects.filter(name__icontains=search).order_by("name")
+
+            def label(obj):
+                return obj.name
+        elif kind == "tasks":
+            from tasks.services.access import visible_tasks_for
+
+            if not user.has_perm("tasks.view_task"):
+                raise PermissionDenied()
+            qs = (
+                visible_tasks_for(user)
+                .filter(title__icontains=search)
+                .order_by("title")
+            )
+
+            def label(obj):
+                return obj.title
+        else:
+            raise ValidationError("Unknown choice directory.")
+        pager = StandardPagination()
+        objects = pager.paginate_queryset(qs, request)
+        return pager.get_paginated_response(
+            [{"id": str(obj.pk), "label": label(obj)} for obj in objects]
+        )
