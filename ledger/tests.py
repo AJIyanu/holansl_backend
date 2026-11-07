@@ -1,714 +1,347 @@
-"""Accounting, settlement, access and historical-report regressions on local PostgreSQL."""
-
 import uuid
-from datetime import date
-from decimal import Decimal as D
-from django.test import TestCase
-from django.db import connection, transaction, IntegrityError
+from decimal import Decimal
+from unittest.mock import patch
+
 from django.contrib.auth import get_user_model
-from django.contrib.auth.models import Permission
+from django.contrib.auth.models import Permission, Group
+from django.db import DatabaseError, transaction
+from django.test import TestCase, SimpleTestCase
+from django.urls import resolve, Resolver404
 from rest_framework.test import APIClient
-from rest_framework.exceptions import ValidationError, PermissionDenied
-from accounts.models import Department
-from crm.models import Party, PartyRole
-from ledger import models as m
-from ledger.services import records, setup, business_posting as bp, settlement, tax
-from ledger.services.common import make, Conflict
-from ledger.selectors.statements import generate
-from ledger.integrations.procurement import set_client_code
+
+from accounts.serializers import format_permission
+from .models import CashBookEntry, CashBookJournal
 
 
-class LedgerTests(TestCase):
-    @classmethod
-    def setUpTestData(cls):
-        cls.user = get_user_model().objects.create_superuser(
-            username="ledger-test", email="ledger@example.invalid", password="test-only"
-        )
-        cls.department, _ = Department.objects.get_or_create(
-            name="Accounts", defaults={"code": "ACCT"}
-        )
-        cls.party = Party.objects.create(
-            display_name="Ledger client", entity_kind="INDIVIDUAL"
-        )
-        PartyRole.objects.create(party=cls.party, role="CLIENT")
-        cls.other = Party.objects.create(
-            display_name="Other client", entity_kind="INDIVIDUAL"
-        )
-        PartyRole.objects.create(party=cls.other, role="CLIENT")
-        cls.currency = m.Currency.objects.get(code="NGN")
-        cls.usd = m.Currency.objects.get(code="USD")
-        cls.accounts = {}
-        for code, kind in [
-            ("AR", "ASSET"),
-            ("AP", "LIABILITY"),
-            ("DEFERRED", "LIABILITY"),
-            ("SALES", "INCOME"),
-            ("ADVANCE", "ASSET"),
-            ("EQUITY", "EQUITY"),
-            ("BANK", "ASSET"),
-            ("DELIVERY", "EXPENSE"),
-            ("TAX", "LIABILITY"),
+class RetiredLedgerTests(SimpleTestCase):
+    def test_old_endpoints_remain_removed(self):
+        for path in [
+            "/ledger/invoices/",
+            "/ledger/capabilities/",
+            "/ledger/withholdings/",
         ]:
-            cls.accounts[code] = make(
-                m.LedgerAccount, cls.user, code=code, name=code, classification=kind
-            )
-        cls.policy = setup.create_setup(
-            cls.user,
-            m.PostingPolicyVersion,
-            dict(
-                name="Test policy",
-                receivable=cls.accounts["AR"],
-                payable=cls.accounts["AP"],
-                deferred_revenue=cls.accounts["DEFERRED"],
-                revenue=cls.accounts["SALES"],
-                advance=cls.accounts["ADVANCE"],
-                opening_equity=cls.accounts["EQUITY"],
-            ),
-        )
-        cls.bank = make(
-            m.CashAccount,
-            cls.user,
-            name="NGN bank",
-            kind="BANK",
-            account=make(
-                m.AccountCurrency,
-                cls.user,
-                account=cls.accounts["BANK"],
-                currency=cls.currency,
-            ),
-        )
-        setup.create_year(cls.user, 2026)
-        set_client_code(cls.user, cls.party, "LGR")
-        set_client_code(cls.user, cls.other, "OTH")
-        cls.doc = make(
-            m.LedgerDocument,
-            cls.user,
-            party=cls.party,
-            filename="proof.pdf",
-            mime_type="application/pdf",
-            checksum="0" * 64,
-            size_bytes=10,
-            storage_provider="supabase",
-            external_file_id="private-test",
-        )
-        cls.tax_type = make(
-            m.TaxType,
-            cls.user,
-            code="TEST",
-            name="Test invoice tax",
-            authority="Test authority",
-        )
-        cls.tax_policy = make(
-            m.TaxPolicyVersion,
-            cls.user,
-            tax_type=cls.tax_type,
-            effective_from=date(2026, 1, 1),
-            rate=D(5),
-            liability_account=cls.accounts["TAX"],
-            treatment="CLIENT_REMITTANCE",
-            verified_reference="Isolated illustrative policy; not statutory",
-        )
+            with self.assertRaises(Resolver404):
+                resolve(path)
 
+
+class CashBookTests(TestCase):
     def setUp(self):
-        self.api = APIClient()
-        self.api.force_authenticate(self.user)
-
-    def create(self, kind, **kwargs):
-        data = dict(
-            party=self.party,
-            currency=self.currency,
-            policy=self.policy,
-            date=date(2026, 9, 1),
-            description="Test record",
-            evidence=self.doc,
+        self.user = get_user_model().objects.create_user(
+            username="cash-test", email="cash@example.test", is_staff=True
         )
-        data.update(kwargs)
-        return records.create(self.user, kind, data)
-
-    def post(self, record):
-        record = records.submit(self.user, record, record.version)
-        record = records.decide(
-            self.user, record, record.version, True, "Checked supporting evidence"
+        self.client = APIClient()
+        self.grant(
+            "view_cashbookentry",
+            "add_cashbookentry",
+            "change_cashbookentry",
+            "delete_cashbookentry",
+            "view_cashbookjournal",
         )
-        return bp.post(self.user, record, record.version)
 
-    def invoice(self, tax_policy=None, value="100000", **kwargs):
-        line = dict(
-            description="Smart switch", unit="unit", quantity=D(1), unit_price=D(value)
-        )
-        if tax_policy:
-            line["tax_policy"] = tax_policy
-        return self.post(self.create("INVOICE", lines=[line], **kwargs))
-
-    def receipt(self, value="98000", **kwargs):
-        return self.post(
-            self.create(
-                "RECEIPT",
-                amount=D(value),
-                cash_account=self.bank,
-                purpose="CLIENT",
-                **kwargs,
+    def grant(self, *codes):
+        self.user.user_permissions.set(
+            Permission.objects.filter(
+                content_type__app_label="ledger", codename__in=codes
             )
         )
+        self.user = get_user_model().objects.get(pk=self.user.pk)
+        self.client.force_authenticate(self.user)
 
-    def test_currency_year_and_no_legacy_models(self):
-        self.assertEqual(
-            set(m.Currency.objects.values_list("code", flat=True)),
-            {"NGN", "USD", "GBP"},
-        )
-        self.assertEqual(m.AccountingPeriod.objects.count(), 12)
-        self.assertFalse(hasattr(m, "Expectation"))
-
-    def test_invoice_double_entry_and_approval_audit(self):
-        invoice = self.invoice()
-        journal = invoice.journals.get()
-        self.assertEqual(sum(x.debit for x in journal.lines.all()), D("100000"))
-        self.assertEqual(sum(x.credit for x in journal.lines.all()), D("100000"))
-        self.assertEqual(
-            journal.lines.get(account__account=self.accounts["DEFERRED"]).credit,
-            D("100000"),
-        )
-        self.assertFalse(
-            journal.lines.filter(account__account=self.accounts["SALES"]).exists()
-        )
-        decision = invoice.revisions.get().approval.decision
-        self.assertEqual(decision.created_by_id, self.user.pk)
-        self.assertTrue(decision.reason)
-        with self.assertRaises(ValidationError):
-            bp.post(self.user, invoice, invoice.version)
-
-    def test_approved_content_and_posted_lines_are_immutable(self):
-        invoice = self.invoice()
-        with self.assertRaises(IntegrityError), transaction.atomic():
-            m.FinancialRecord.objects.filter(pk=invoice.pk).update(amount=D("1"))
-        with self.assertRaises(IntegrityError), transaction.atomic():
-            m.JournalLine.objects.filter(entry__source=invoice).update(debit=D("2"))
-
-    def test_database_rejects_unbalanced_journal_even_without_service(self):
-        period = m.AccountingPeriod.objects.get(start=date(2026, 9, 1))
-        from django.utils import timezone
-
-        with self.assertRaises(IntegrityError), transaction.atomic():
-            entry = make(
-                m.JournalEntry,
-                self.user,
-                date=date(2026, 9, 1),
-                period=period,
-                currency=self.currency,
-                event="INVALID",
-                description="invalid",
-            )
-            account = make(
-                m.AccountCurrency,
-                self.user,
-                account=self.accounts["AR"],
-                currency=self.currency,
-            )
-            make(
-                m.JournalLine,
-                self.user,
-                entry=entry,
-                account=account,
-                debit=D("10"),
-                credit=0,
-            )
-            entry.posted_at = timezone.now()
-            entry.save(update_fields=["posted_at"])
-            with connection.cursor() as cursor:
-                cursor.execute("SET CONSTRAINTS ALL IMMEDIATE")
-
-    def test_receipt_partial_bulk_and_release_preserve_cash(self):
-        first = self.invoice(value="60000")
-        second = self.invoice(value="40000")
-        receipt = self.receipt("100000")
-        source = receipt.settlement_source
-        a = settlement.allocate(
-            self.user, source, first.invoice, D("60000"), date(2026, 9, 1)
-        )
-        settlement.allocate(
-            self.user, source, second.invoice, D("40000"), date(2026, 9, 1)
-        )
-        self.assertEqual(settlement.invoice_due(first.invoice), 0)
-        with self.assertRaises(ValidationError):
-            settlement.allocate(
-                self.user, source, second.invoice, D(1), date(2026, 9, 1)
-            )
-        settlement.release(self.user, a, D("10000"), date(2026, 9, 2), "Reallocate")
-        self.assertEqual(settlement.source_available(source), D("10000"))
-        self.assertEqual(m.ClientMovement.objects.filter(kind="RECEIPT").count(), 1)
-
-    def test_statement_opening_period_and_future_allocation_history(self):
-        prior = self.invoice(value="20000", date=date(2026, 8, 31))
-        current = self.invoice(value="100000")
-        receipt = self.receipt("98000")
-        application = settlement.allocate(
-            self.user,
-            receipt.settlement_source,
-            current.invoice,
-            D("98000"),
-            date(2026, 9, 1),
-        )
-        before = generate(
-            self.user, self.party, self.currency, date(2026, 9, 1), date(2026, 9, 1)
-        )
-        self.assertEqual(D(before.data["opening_balance"]), D("20000"))
-        self.assertEqual(D(before.data["closing_balance"]), D("22000"))
-        self.receipt("30000", date=date(2026, 9, 2))
-        settlement.release(
-            self.user, application, D("98000"), date(2026, 9, 2), "Move to older debt"
-        )
-        after = generate(
-            self.user, self.party, self.currency, date(2026, 9, 1), date(2026, 9, 1)
-        )
-        self.assertEqual(before.data["closing_balance"], after.data["closing_balance"])
-        self.assertEqual(before.data["outstanding"], after.data["outstanding"])
-        self.assertTrue(prior)
-
-    def test_withholding_settles_debt_but_not_cash_and_remittance_only_collected(self):
-        # Net 100000 + test tax 5000; cash 103000 plus documented withholding 2000.
-        invoice = self.invoice(tax_policy=self.tax_policy)
-        line = invoice.invoice.lines.get()
-        auth = tax.authorize(
-            self.user,
-            dict(
-                party=self.party,
-                tax_type=self.tax_type,
-                effective_from=date(2026, 1, 1),
-                reason="Approved eligibility",
-                evidence=self.doc,
-            ),
-        )
-        withholding = self.post(
-            self.create(
-                "WITHHOLDING",
-                line=line,
-                authorization=auth,
-                certificate_reference="WHT-TEST",
-                amount=D("2000"),
-            )
-        )
-        receipt = self.receipt("103000")
-        settlement.allocate(
-            self.user,
-            receipt.settlement_source,
-            invoice.invoice,
-            D("103000"),
-            date(2026, 9, 1),
-            [dict(line=line, amount=D("3000"))],
-        )
-        self.assertEqual(settlement.invoice_due(invoice.invoice), 0)
-        statement = generate(
-            self.user, self.party, self.currency, date(2026, 9, 1), date(2026, 9, 1)
-        )
-        self.assertEqual(D(statement.data["closing_balance"]), 0)
-        self.assertEqual(D(statement.data["cash_received_total"]), D("103000"))
-        self.assertEqual(D(statement.data["withheld_total"]), D("2000"))
-        self.assertEqual(tax.remittable(self.tax_policy, self.currency), D("3000"))
-        self.assertFalse(
-            withholding.journals.get().lines.filter(account=self.bank.account).exists()
-        )
-
-    def test_unauthorized_and_excess_withholding_rejected(self):
-        invoice = self.invoice(tax_policy=self.tax_policy)
-        line = invoice.invoice.lines.get()
-        auth = tax.authorize(
-            self.user,
-            dict(
-                party=self.party,
-                tax_type=self.tax_type,
-                effective_from=date(2026, 9, 2),
-                reason="Later eligibility",
-                evidence=self.doc,
-            ),
-        )
-        record = self.create(
-            "WITHHOLDING",
-            line=line,
-            authorization=auth,
-            certificate_reference="TEST",
-            amount=D("2000"),
-        )
-        with self.assertRaises(ValidationError):
-            self.post(record)
-        self.assertEqual(m.ClientMovement.objects.filter(kind="WITHHOLDING").count(), 0)
-
-    def test_currency_mismatch_and_cross_client_allocation(self):
-        invoice = self.invoice()
-        with self.assertRaises(ValidationError):
-            self.create(
-                "RECEIPT",
-                currency=self.usd,
-                amount=D("10"),
-                cash_account=self.bank,
-                purpose="CLIENT",
-            )
-        other_doc = make(
-            m.LedgerDocument,
-            self.user,
-            party=self.other,
-            filename="other.pdf",
-            mime_type="application/pdf",
-            checksum="1" * 64,
-            size_bytes=1,
-            storage_provider="supabase",
-            external_file_id="test",
-        )
-        receipt = self.receipt("10", party=self.other, evidence=other_doc)
-        with self.assertRaises(ValidationError):
-            settlement.allocate(
-                self.user,
-                receipt.settlement_source,
-                invoice.invoice,
-                D(10),
-                date(2026, 9, 1),
-            )
-
-    def test_closed_period_and_stale_version(self):
-        record = self.create(
-            "INVOICE",
-            lines=[
-                dict(description="Switch", unit="each", quantity=D(1), unit_price=D(1))
-            ],
-        )
-        with self.assertRaises(Conflict):
-            records.submit(self.user, record, 42)
-        period = m.AccountingPeriod.objects.get(start=date(2026, 9, 1))
-        setup.period_action(self.user, period, 0, True, "Month closed")
-        with self.assertRaises(Conflict):
-            self.post(record)
-
-    def test_reverse_receipt_keeps_historical_statement_and_evidence(self):
-        from ledger.services.reversals import reverse
-
-        invoice = self.invoice()
-        receipt = self.receipt("100000")
-        settlement.allocate(
-            self.user,
-            receipt.settlement_source,
-            invoice.invoice,
-            D("100000"),
-            date(2026, 9, 1),
-        )
-        reverse(
-            self.user, receipt, date(2026, 9, 2), "Bank confirmed receipt was reversed"
-        )
-        statement = generate(
-            self.user, self.party, self.currency, date(2026, 9, 1), date(2026, 9, 1)
-        )
-        self.assertEqual(D(statement.data["closing_balance"]), 0)
-        current = generate(
-            self.user, self.party, self.currency, date(2026, 9, 1), date(2026, 9, 2)
-        )
-        self.assertEqual(D(current.data["closing_balance"]), D("100000"))
-        self.assertEqual(m.Receipt.objects.count(), 1)
-
-    def test_advance_clearance_counts_cost_once(self):
-        advance = self.post(
-            self.create("ADVANCE", amount=D("50000"), custodian=self.user)
-        )
-        payment = self.post(
-            self.create(
-                "PAYMENT",
-                amount=D("50000"),
-                cash_account=self.bank,
-                purpose="ADVANCE",
-                target=advance,
-            )
-        )
-        self.post(
-            self.create(
-                "CLEARANCE",
-                advance=advance,
-                cost_lines=[
-                    dict(
-                        account=self.accounts["DELIVERY"],
-                        amount=D("42000"),
-                        description="Actual logistics",
-                        evidence=self.doc,
-                    )
-                ],
-            )
-        )
-        self.post(
-            self.create(
-                "RECEIPT",
-                amount=D("8000"),
-                cash_account=self.bank,
-                purpose="ADVANCE_RETURN",
-                target=advance,
-            )
-        )
-        self.assertEqual(bp.advance_outstanding(advance), 0)
-        expense = m.JournalLine.objects.filter(
-            account__account=self.accounts["DELIVERY"]
-        )
-        self.assertEqual(sum(x.debit for x in expense), D("42000"))
-        self.assertFalse(m.ClientMovement.objects.exists())
-        self.assertEqual(payment.journals.count(), 1)
-
-    def test_api_idempotency_and_permissions(self):
-        payload = dict(
-            party=str(self.party.pk),
-            currency="NGN",
-            policy=str(self.policy.pk),
-            date="2026-09-01",
-            lines=[
-                dict(description="Switch", unit="each", quantity="1", unit_price="100")
-            ],
-        )
-        key = str(uuid.uuid4())
-        first = self.api.post(
-            "/ledger/invoices/", payload, format="json", HTTP_IDEMPOTENCY_KEY=key
-        )
-        self.assertEqual(first.status_code, 201, first.data)
-        second = self.api.post(
-            "/ledger/invoices/", payload, format="json", HTTP_IDEMPOTENCY_KEY=key
-        )
-        self.assertEqual(first.data, second.data)
-        payload["description"] = "Different"
-        self.assertEqual(
-            self.api.post(
-                "/ledger/invoices/", payload, format="json", HTTP_IDEMPOTENCY_KEY=key
-            ).status_code,
-            409,
-        )
-        staff = get_user_model().objects.create_user(
-            username="restricted", password="test", is_staff=True
-        )
-        staff.user_permissions.add(
-            Permission.objects.get(
-                content_type__app_label="ledger", codename="view_financialrecord"
-            ),
-            Permission.objects.get(
-                content_type__app_label="ledger", codename="view_invoice"
-            ),
-        )
-        self.api.force_authenticate(staff)
-        self.assertEqual(self.api.get("/ledger/invoices/").data["count"], 0)
-        self.assertEqual(
-            self.api.post(
-                "/ledger/invoices/",
-                payload,
-                format="json",
-                HTTP_IDEMPOTENCY_KEY=str(uuid.uuid4()),
-            ).status_code,
-            403,
-        )
-        with self.assertRaises(PermissionDenied):
-            generate(
-                staff, self.party, self.currency, date(2026, 9, 1), date(2026, 9, 1)
-            )
-
-    def test_manual_cannot_bypass_invoice_control_account(self):
-        ar = make(
-            m.AccountCurrency,
-            self.user,
-            account=self.accounts["AR"],
-            currency=self.currency,
-        )
-        record = self.create(
-            "MANUAL",
-            journal_lines=[
-                dict(account=self.bank.account, debit=D(10), credit=0),
-                dict(account=ar, debit=0, credit=D(10)),
-            ],
-        )
-        with self.assertRaises(ValidationError):
-            self.post(record)
-
-    def test_income_withholding_default_and_vat_separation(self):
-        invoice = self.invoice(tax_policy=self.tax_policy)
-        credit = make(
-            m.LedgerAccount,
-            self.user,
-            code="WHT",
-            name="Income tax credits",
-            classification="ASSET",
-        )
-        auth = tax.authorize(
-            self.user,
-            dict(
-                party=self.party,
-                tax_type=self.tax_type,
-                effective_from=date(2026, 1, 1),
-                reason="Manager-approved client rate",
-                evidence=self.doc,
-                treatment="INCOME_WHT",
-                credit_account=credit,
-            ),
-        )
-        self.assertEqual(auth.rate, D("2.5"))
-        deduction = self.post(
-            self.create(
-                "WITHHOLDING",
-                line=invoice.invoice.lines.get(),
-                authorization=auth,
-                certificate_reference="CERT",
-                amount=D("2500"),
-            )
-        )
-        self.assertEqual(deduction.withholding.rate, D("2.5"))
-        self.assertEqual(settlement.tax_withheld(invoice.invoice.lines.get()), 0)
-        self.assertEqual(
-            deduction.journals.get().lines.get(account__account=credit).debit, D("2500")
-        )
-        self.assertFalse(
-            deduction.journals.get()
-            .lines.filter(account__account=self.accounts["TAX"])
-            .exists()
-        )
-        report = tax.report(
-            self.user, self.currency, date(2026, 9, 1), date(2026, 9, 1)
-        )
-        self.assertEqual(D(report["results"][0]["withheld"]), 0)
-        self.assertEqual(D(report["income_wht"][0]["amount"]), D("2500"))
-        with self.assertRaises(ValidationError):
-            self.post(
-                self.create(
-                    "WITHHOLDING",
-                    line=invoice.invoice.lines.get(),
-                    authorization=auth,
-                    certificate_reference="DUP",
-                    amount=D("2500"),
-                )
-            )
-
-    def test_income_withholding_custom_rate_and_wrong_amount(self):
-        invoice = self.invoice()
-        credit = make(
-            m.LedgerAccount,
-            self.user,
-            code="WHT",
-            name="Income tax credits",
-            classification="ASSET",
-        )
-        auth = tax.authorize(
-            self.user,
-            dict(
-                party=self.party,
-                tax_type=self.tax_type,
-                effective_from=date(2026, 1, 1),
-                reason="Custom rate",
-                evidence=self.doc,
-                treatment="INCOME_WHT",
-                credit_account=credit,
-                rate=D("3"),
-            ),
-        )
-        with self.assertRaises(ValidationError):
-            self.create(
-                "WITHHOLDING",
-                line=invoice.invoice.lines.get(),
-                authorization=auth,
-                certificate_reference="BAD",
-                amount=D("2500"),
-            )
-        posted = self.post(
-            self.create(
-                "WITHHOLDING",
-                line=invoice.invoice.lines.get(),
-                authorization=auth,
-                certificate_reference="GOOD",
-                amount=D("1500"),
-                taxable_base=D("50000"),
-            )
-        )
-        self.assertEqual(posted.withholding.rate, D("3"))
-
-    def test_journal_filters_and_analytics_scope(self):
-        self.invoice()
-        response = self.api.get(
-            "/ledger/journals/",
-            {"currency": "USD", "date_from": "2026-09-01", "date_to": "2026-09-30"},
-        )
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data["count"], 0)
-        response = self.api.get(
-            "/ledger/analytics/",
-            {"currency": "NGN", "date_from": "2026-09-01", "date_to": "2026-09-30"},
-        )
-        self.assertEqual(response.status_code, 200)
-        self.assertTrue(response.data["balances"])
-        limited = get_user_model().objects.create_user(
-            username="limited-ledger", password="test-only", is_staff=True
-        )
-        limited.user_permissions.add(
-            Permission.objects.get(
-                content_type__app_label="ledger", codename="view_financialrecord"
-            )
-        )
-        self.api.force_authenticate(limited)
-        self.assertEqual(
-            self.api.get(
-                "/ledger/analytics/",
-                {"currency": "NGN", "date_from": "2026-09-01", "date_to": "2026-09-30"},
-            ).status_code,
-            403,
-        )
-
-    def test_account_book_opening_running_balance_and_currency_guard(self):
-        self.invoice(value="1000")
-        self.invoice(value="2000", date=date(2026, 9, 2))
-        account = m.AccountCurrency.objects.get(
-            account=self.accounts["AR"], currency=self.currency
-        )
-        params = {
-            "account": str(account.pk),
-            "currency": "NGN",
-            "date_from": "2026-09-02",
-            "date_to": "2026-09-02",
+    def payload(self, **changes):
+        return {
+            "date": "2026-01-10",
+            "kind": "RECEIPT",
+            "amount": "100.00",
+            "description": "Cash receipt",
+            "request_key": str(uuid.uuid4()),
+            **changes,
         }
-        response = self.api.get("/ledger/account-book/", params)
-        self.assertEqual(response.status_code, 200, response.data)
-        self.assertEqual(D(response.data["summary"]["opening_balance"]), D("1000"))
-        self.assertEqual(D(response.data["summary"]["closing_balance"]), D("3000"))
-        self.assertEqual(D(response.data["results"][0]["running_balance"]), D("3000"))
+
+    def create(self, **changes):
+        response = self.client.post(
+            "/ledger/cash-book/", self.payload(**changes), format="json"
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+        return response.data
+
+    def test_zero_opening_calendar_year(self):
+        response = self.client.get("/ledger/cash-book/?year=2026")
+        self.assertEqual(response.status_code, 200)
         self.assertEqual(
-            self.api.get(
-                "/ledger/account-book/", {**params, "currency": "USD"}
+            response.data["summary"],
+            {
+                "currency": "NGN",
+                "year": 2026,
+                "date_from": "2026-01-01",
+                "date_to": "2026-12-31",
+                "opening_balance": "0.00",
+                "debit": "0.00",
+                "credit": "0.00",
+                "closing_balance": "0.00",
+            },
+        )
+
+    def test_income_expense_and_capital_post_balanced_pairs(self):
+        for kind, debit, credit in [
+            ("RECEIPT", "CASH", "INCOME"),
+            ("EXPENSE", "EXPENSE", "CASH"),
+            ("CAPITAL", "CASH", "CAPITAL"),
+        ]:
+            entry = self.create(kind=kind)
+            journal = CashBookJournal.objects.get(entry_id=entry["id"])
+            self.assertEqual(
+                (journal.debit_account, journal.credit_account, journal.amount),
+                (debit, credit, Decimal("100")),
+            )
+            self.assertEqual(journal.actor, self.user)
+
+    def test_permission_matrix_and_format(self):
+        entry = self.create()
+        url = f"/ledger/cash-book/{entry['id']}/"
+        self.grant()
+        for method, path, data in [
+            ("get", "/ledger/cash-book/", {}),
+            ("get", url, {}),
+            ("get", "/ledger/cash-book-journal/", {}),
+            ("post", "/ledger/cash-book/", self.payload()),
+            ("patch", url, {"version": 1, "reason": "Fix", "amount": "25.00"}),
+            ("delete", url, {"version": 1, "reason": "Duplicate"}),
+        ]:
+            response = getattr(self.client, method)(path, data, format="json")
+            self.assertEqual(response.status_code, 403, (method, response.data))
+        self.grant("view_cashbookentry")
+        self.assertEqual(self.client.get(url).status_code, 200)
+        for method in ["post", "patch", "delete"]:
+            self.assertEqual(
+                getattr(self.client, method)(
+                    url if method != "post" else "/ledger/cash-book/", {}, format="json"
+                ).status_code,
+                403,
+            )
+        self.assertEqual(self.client.get("/ledger/cash-book-journal/").status_code, 403)
+        permission = Permission.objects.get(
+            content_type__app_label="ledger", codename="change_cashbookentry"
+        )
+        self.assertEqual(format_permission(permission), "ledger.cashbookentry.edit")
+
+    def test_mutation_permission_alone_denied(self):
+        self.grant("add_cashbookentry")
+        self.assertEqual(
+            self.client.post(
+                "/ledger/cash-book/", self.payload(), format="json"
+            ).status_code,
+            403,
+        )
+
+    def test_role_permissions_are_used(self):
+        self.grant()
+        role, _ = Group.objects.get_or_create(name="Cash book clerk")
+        role.permissions.set(
+            Permission.objects.filter(
+                content_type__app_label="ledger", codename="view_cashbookentry"
+            )
+        )
+        self.user.groups.add(role)
+        self.client.force_authenticate(get_user_model().objects.get(pk=self.user.pk))
+        self.assertEqual(self.client.get("/ledger/cash-book/").status_code, 200)
+        role.permissions.clear()
+        self.client.force_authenticate(get_user_model().objects.get(pk=self.user.pk))
+        self.assertEqual(self.client.get("/ledger/cash-book/").status_code, 403)
+
+    def test_nonstaff_anonymous_and_superuser(self):
+        self.user.is_staff = False
+        self.user.save()
+        self.assertEqual(self.client.get("/ledger/cash-book/").status_code, 403)
+        self.client.force_authenticate(None)
+        self.assertIn(self.client.get("/ledger/cash-book/").status_code, [401, 403])
+        self.user.is_superuser = True
+        self.user.save()
+        self.client.force_authenticate(self.user)
+        self.assertEqual(self.client.get("/ledger/cash-book/").status_code, 200)
+
+    def test_invalid_input_does_not_post(self):
+        for changes in [
+            {"amount": "0"},
+            {"amount": "-1"},
+            {"amount": "0.001"},
+            {"amount": "NaN"},
+            {"kind": "OTHER"},
+            {"description": " "},
+            {"date": "2026-02-30"},
+        ]:
+            response = self.client.post(
+                "/ledger/cash-book/", self.payload(**changes), format="json"
+            )
+            self.assertEqual(response.status_code, 400, response.data)
+        self.assertFalse(CashBookEntry.objects.exists())
+        self.assertFalse(CashBookJournal.objects.exists())
+
+    def test_retry_idempotency(self):
+        payload = self.payload()
+        first = self.client.post("/ledger/cash-book/", payload, format="json")
+        second = self.client.post("/ledger/cash-book/", payload, format="json")
+        self.assertEqual(first.data["id"], second.data["id"])
+        self.assertEqual(CashBookJournal.objects.count(), 1)
+        payload["amount"] = "999.00"
+        self.assertEqual(
+            self.client.post("/ledger/cash-book/", payload, format="json").status_code,
+            400,
+        )
+
+    def test_edit_void_history_and_stale_write(self):
+        entry = self.create()
+        url = f"/ledger/cash-book/{entry['id']}/"
+        response = self.client.patch(
+            url,
+            {"amount": "60.00", "version": 1, "reason": "Correct receipt"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(CashBookJournal.objects.count(), 3)
+        original = CashBookJournal.objects.filter(reverses__isnull=True).earliest(
+            "created_at"
+        )
+        self.assertEqual(original.amount, Decimal("100"))
+        self.assertEqual(original.reversal.credit_account, "CASH")
+        self.assertEqual(original.reversal.reason, "Correct receipt")
+        self.assertEqual(
+            self.client.patch(
+                url, {"amount": "90.00", "version": 1, "reason": "Stale"}, format="json"
+            ).status_code,
+            400,
+        )
+        self.assertEqual(
+            self.client.delete(
+                url, {"version": 2, "reason": "Duplicate receipt"}, format="json"
+            ).status_code,
+            204,
+        )
+        self.assertEqual(CashBookJournal.objects.count(), 4)
+        self.assertTrue(CashBookEntry.objects.get(pk=entry["id"]).voided_at)
+        self.assertEqual(
+            self.client.get("/ledger/cash-book/?year=2026").data["summary"][
+                "closing_balance"
+            ],
+            "0.00",
+        )
+        self.assertEqual(
+            self.client.delete(
+                url, {"version": 3, "reason": "Again"}, format="json"
             ).status_code,
             400,
         )
 
-    def test_cash_holder_requires_active_staff(self):
-        inactive = get_user_model().objects.create_user(
-            username="inactive-holder", is_staff=True, is_active=False
-        )
-        with self.assertRaises(ValidationError):
-            setup.update_setup(
-                self.user, self.bank, {"custodian": inactive, "reason": "Assignment"}
+    def test_reason_and_version_required(self):
+        entry = self.create()
+        url = f"/ledger/cash-book/{entry['id']}/"
+        for data in [{"version": 1}, {"reason": "Fix"}, {"version": 1, "reason": " "}]:
+            self.assertEqual(
+                self.client.patch(url, data, format="json").status_code, 400
             )
-        result = setup.update_setup(
-            self.user,
-            self.bank,
-            {"custodian": self.user, "reason": "Temporary assignment"},
-        )
-        self.assertEqual(result.custodian, self.user)
+            self.assertEqual(
+                self.client.delete(url, data, format="json").status_code, 400
+            )
+        self.assertEqual(CashBookJournal.objects.count(), 1)
 
-    def test_document_picker_obeys_own_document_scope(self):
-        limited = get_user_model().objects.create_user(
-            username="document-clerk", is_staff=True
-        )
-        limited.user_permissions.add(
-            *Permission.objects.filter(
-                content_type__app_label="ledger",
-                codename__in=["view_financialrecord", "view_ledgerdocument"],
-            )
-        )
-        own = make(
-            m.LedgerDocument,
-            limited,
-            filename="own.pdf",
-            mime_type="application/pdf",
-            checksum="1" * 64,
-            size_bytes=1,
-            storage_provider="supabase",
-            external_file_id="test",
-        )
-        self.api.force_authenticate(limited)
-        response = self.api.get("/ledger/lookups/", {"kind": "documents"})
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual([x["id"] for x in response.data["results"]], [str(own.pk)])
+    def test_failure_rolls_back(self):
+        with patch("ledger.services.post", side_effect=RuntimeError("Test failure")):
+            with self.assertRaises(RuntimeError):
+                self.create()
+        self.assertFalse(CashBookEntry.objects.exists())
+
+    def test_database_journal_immutable(self):
+        self.create()
+        for operation in [
+            lambda: CashBookJournal.objects.update(amount=Decimal("2")),
+            lambda: CashBookJournal.objects.all().delete(),
+        ]:
+            with self.assertRaises(DatabaseError), transaction.atomic():
+                operation()
+
+    def test_range_carry_forward_pagination(self):
+        self.create(date="2025-12-31", amount="150.00")
+        self.create(date="2026-01-01", amount="20.00")
+        self.create(date="2026-01-02", kind="EXPENSE", amount="45.00")
+        self.create(date="2027-01-01", amount="99.00")
+        response = self.client.get("/ledger/cash-book/?year=2026&page_size=1&page=2")
+        self.assertEqual(response.data["summary"]["opening_balance"], "150.00")
+        self.assertEqual(response.data["summary"]["closing_balance"], "125.00")
+        self.assertEqual(response.data["results"][0]["running_balance"], "125.00")
+        response = self.client.get("/ledger/cash-book/?year=2026&date_from=2026-01-02")
+        self.assertEqual(response.data["summary"]["opening_balance"], "170.00")
         self.assertEqual(
-            self.api.get(f"/ledger/documents/{self.doc.pk}/").status_code, 404
+            len(
+                self.client.get("/ledger/cash-book-journal/?year=2026").data["results"]
+            ),
+            2,
         )
+
+    def test_invalid_ranges(self):
+        for query in [
+            "year=no",
+            "year=0",
+            "year=2026&date_from=2027-01-01",
+            "year=2026&date_from=2026-10-01&date_to=2026-01-01",
+        ]:
+            self.assertEqual(
+                self.client.get(f"/ledger/cash-book/?{query}").status_code, 400
+            )
+
+    def test_journal_read_only(self):
+        entry = self.create()
+        journal = CashBookJournal.objects.get(entry_id=entry["id"])
+        self.user.is_superuser = True
+        self.user.save()
+        self.assertEqual(
+            self.client.patch(
+                f"/ledger/cash-book-journal/{journal.pk}/", {}, format="json"
+            ).status_code,
+            405,
+        )
+
+    def test_failed_correction_rolls_back_reversal(self):
+        entry = self.create()
+        with patch("ledger.services.post", side_effect=RuntimeError("Test failure")):
+            with self.assertRaises(RuntimeError):
+                self.client.patch(
+                    f"/ledger/cash-book/{entry['id']}/",
+                    {"amount": "70.00", "version": 1, "reason": "Correction"},
+                    format="json",
+                )
+        saved = CashBookEntry.objects.get(pk=entry["id"])
+        self.assertEqual(saved.amount, Decimal("100"))
+        self.assertEqual(saved.version, 1)
+        self.assertEqual(CashBookJournal.objects.count(), 1)
+
+    def test_date_kind_correction_keeps_journal_and_cash_balances_equal(self):
+        entry = self.create(date="2025-12-31")
+        response = self.client.patch(
+            f"/ledger/cash-book/{entry['id']}/",
+            {
+                "date": "2026-01-01",
+                "kind": "EXPENSE",
+                "amount": "25.00",
+                "version": 1,
+                "reason": "Correct date and type",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            self.client.get("/ledger/cash-book/?year=2025").data["summary"][
+                "closing_balance"
+            ],
+            "0.00",
+        )
+        self.assertEqual(
+            self.client.get("/ledger/cash-book/?year=2026").data["summary"][
+                "closing_balance"
+            ],
+            "-25.00",
+        )
+        journals = CashBookJournal.objects.all()
+        balance = sum(
+            row.amount if row.debit_account == "CASH" else -row.amount
+            for row in journals
+        )
+        self.assertEqual(balance, Decimal("-25"))

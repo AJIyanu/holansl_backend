@@ -1,1 +1,0 @@
-"""Authorized ledger read projections."""

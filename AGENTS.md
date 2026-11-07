@@ -17,6 +17,12 @@ documents are standards/specifications, not additional agent entry points.
 
 ## Shared working rules
 
+- Keep full item references (`invoice-reference.serial-number`) in app/code and
+  immutable snapshots for precise internal referencing. Client-facing invoice
+  previews, PDFs and email attachments show only item S/N (1, 2, 3, …), alongside
+  the description. Keep the invoice number in the document metadata; never print
+  the full per-item reference on a client document.
+
 - Present a plan and wait for explicit user approval before editing files.
   Once approved, write files directly; no manual-copy code or Bash scaffolding is
   required. Stage-by-stage pauses are not mandatory within the approved scope.
@@ -29,8 +35,8 @@ documents are standards/specifications, not additional agent entry points.
   supply. This is a Nigerian procurement company's staff-only dashboard, not the
   UK public marine website.
 - Accounts, Party-based CRM, tasks and notifications are built. Preserve their
-  actual routes/contracts. Procurement and ledger backends are built and migrated; consult their app docs
-  for current contracts, configuration and frontend work.
+  actual routes/contracts. Procurement is built. Ledger was reset on 2026-11-03; the first rebuild feature is a basic NGN cash book.
+  Extend it one explicitly agreed feature at a time. Consult app docs for status.
 - New features, feature changes and corrections must be recorded in the affected
   repository's Git-ignored DEVELOPMENT_LOG.local.md with timestamp, functions,
   reason when known and verification. Do not reset or commit local history.

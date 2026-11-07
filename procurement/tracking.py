@@ -23,7 +23,7 @@ MILESTONES = [
 FINANCE = {
     "available": True,
     "status": "AVAILABLE",
-    "reason": "Official financial records are managed by the Accounts ledger.",
+    "reason": "Accounts approves quotations, prepares invoices and posts supplier bills. Sales invoices enter the ledger when marked delivered.",
 }
 
 
@@ -186,9 +186,28 @@ def tracker(item):
         "ITEM_REJECTED",
         "ITEM_REORDERED",
     }
-    from ledger.integrations.procurement import item_finance
+    from ledger.models import ProcurementInvoiceLine
+    from ledger.balances import allocations
+    from django.db.models import Sum
 
-    finance = item_finance(item)
+    finance = {**FINANCE, "invoices": []}
+    for line in ProcurementInvoiceLine.objects.filter(item=item).select_related(
+        "link__transaction"
+    ):
+        invoice = line.link.transaction
+        allocated = allocations(invoice).aggregate(total=Sum("amount"))[
+            "total"
+        ] or Decimal("0")
+        finance["invoices"].append(
+            {
+                "id": str(invoice.pk),
+                "reference": invoice.reference,
+                "currency": invoice.currency,
+                "sent": False,
+                "invoice_cash_allocated": str(allocated),
+                "cancelled": hasattr(invoice, "reversal"),
+            }
+        )
     milestones = []
     for code, label in MILESTONES:
         if code == "INVOICE_SENT":

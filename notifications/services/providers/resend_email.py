@@ -48,8 +48,16 @@ class ResendEmailProvider(NotificationProvider):
         if delivery.body_html:
             payload["html"] = delivery.body_html
 
+        attachments = getattr(delivery, "attachments", None)
+        if attachments:
+            payload["attachments"] = attachments
         try:
-            response = resend.Emails.send(payload)
+            key = getattr(delivery, "idempotency_key", None)
+            response = (
+                resend.Emails.send(payload, {"idempotency_key": key})
+                if key
+                else resend.Emails.send(payload)
+            )
         except Exception as exc:
             raise TemporaryDeliveryError(
                 str(exc),

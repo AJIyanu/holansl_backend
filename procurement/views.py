@@ -499,13 +499,12 @@ class FinanceViewSet(
     @action(detail=True, methods=["post"])
     def submit(self, request, pk=None):
         obj = self.get_object()
-        from ledger.integrations.procurement import submit_finance
+        from ledger.models import FinanceSubmission
 
-        def submit(_):
-            submit_finance(request.user, obj)
-            return obj
-
-        return self.mutate(z.EmptyInput, submit)
+        FinanceSubmission.objects.get_or_create(
+            request=obj, defaults={"actor": request.user}
+        )
+        return Response({"id": str(obj.pk), "status": "SUBMITTED"})
 
 
 class CapabilityViewSet(viewsets.ViewSet):
@@ -647,6 +646,55 @@ class LookupViewSet(viewsets.ViewSet):
 
             def label(obj):
                 return obj.display_name
+        elif kind == "invoice-lines":
+            from ledger.models import ProcurementInvoiceLine, SalesInvoiceItem
+
+            scope = s.visible_requests(user)
+            if request.query_params.get("request"):
+                scope = scope.filter(
+                    pk=z.serializers.UUIDField().run_validation(
+                        request.query_params["request"]
+                    )
+                )
+            old = (
+                ProcurementInvoiceLine.objects.filter(
+                    link__request__in=scope,
+                    link__transaction__reversal__isnull=True,
+                    po_line__isnull=True,
+                    item__description__icontains=search,
+                )
+                .select_related("item", "link__transaction")
+                .order_by("id")
+            )
+            current = (
+                SalesInvoiceItem.objects.filter(
+                    invoice__finance_request__request__in=scope,
+                    invoice__confirmed_revision__isnull=False,
+                    invoice__posted_transaction__isnull=True,
+                    po_line__isnull=True,
+                    description__icontains=search,
+                )
+                .select_related("invoice")
+                .order_by("id")
+            )
+            choices = [
+                {
+                    "id": str(row.pk),
+                    "label": f"{row.link.transaction.reference} · {row.item.description} · {row.quantity} · {row.link.transaction.currency} {row.amount}",
+                }
+                for row in old
+            ]
+            choices += [
+                {
+                    "id": str(row.pk),
+                    "label": f"{row.invoice.reference} · {row.description} · {row.quantity} · {row.invoice.currency} {row.amount}",
+                }
+                for row in current
+            ]
+            pager = StandardPagination()
+            return pager.get_paginated_response(
+                pager.paginate_queryset(choices, request)
+            )
         elif kind == "staff":
             from django.contrib.auth import get_user_model
 

@@ -1,15 +1,16 @@
 # Procurement application
 
 Status: backend implemented; approved application migration applied and verified
-on 2026-09-04. Frontend remains pending. Ledger integration was added on 2026-09-15 and its migrations were applied on 2026-09-15.
+on 2026-09-04. Frontend remains pending. Ledger integration was removed on 2026-11-03 at the user's request.
 
 ## Ownership
 
 Procurement tracks each client-requested item through sourcing, independently
 versioned supplier/client quotations, client PO lines, supplier purchases, Holan
 receipts, deliveries, acceptance/rejection, and linked client reorders. Financial
-requests and refund evidence are drafts/reports only; ledger remains responsible
-for official invoices, receipts, payment allocations, refunds and accounting.
+requests and refund evidence remain drafts/reports only. Official invoices,
+receipts, payment allocations, refunds and accounting are unavailable after the
+ledger reset and will be rebuilt only as individually agreed features.
 
 CRM owns clients, suppliers and receiving contacts. References use CRM validation
 helpers and protected relationships. Names are snapshotted on requests, supplier
@@ -166,9 +167,9 @@ below except capabilities. Generic update/delete operations are not exposed.
 | GET | `documents/{id}/download/` | Authorized attachment stream, private/no-store. |
 | GET, POST | `costs/` | Record unapproved actual costs and evidence. |
 | GET, POST | `finance-requests/` | Prepare financial drafts with nested lines. |
-| POST | `finance-requests/{id}/submit/` | Create/reuse a ledger finance submission snapshot; no journal or money movement. |
+| POST | `finance-requests/{id}/submit/` | Submits for Accounts review; does not itself post a payment. |
 | GET, POST | `task-links/` | Link existing tasks accessible to the staff member. |
-| GET | `capabilities/` | Ledger unavailability and implemented capabilities. |
+| GET | `capabilities/` | Ledger availability and implemented capabilities. |
 
 Common filters: `request`, `client`, `owner` UUIDs. `item` filters item-owned
 resources and items; `kind` filters events/actions/costs/finance drafts. Search is
@@ -265,7 +266,7 @@ inline with the same scope and download permission; ordinary uploads remain
 attachments. All responses are private/no-store.
 
 Quotes require ledger approval for official generation and recording as sent.
-The request-approval action creates a ledger approval request. Official generation
+The request-approval action records procurement-side pending approval only after the ledger reset. Official generation
 and sending require the recorded approval of that exact quotation revision.
 Invoices and receipts are created and generated through ledger; procurement
 register/asset queries exclude those finance-owned document kinds. Waybills do not require
@@ -324,13 +325,22 @@ remain forever unchangeable. Controlled amendments or audited edits before any
 downstream dependency would need an explicit workflow; neither is silently enabled
 by the new draft-edit endpoint.
 
-### Ledger integration — 2026-09-15
+### Ledger reset — 2026-11-03
 
-The [ledger API](ledger.md) now owns quotation decisions, finance submissions,
-posted invoices, receipts, allocations, tax and acceptance-based revenue recognition.
-PO line input accepts exactly one of `quote_line` or `invoice_line` (ledger line UUID);
-existing quotation orders remain compatible. Direct invoice orders retain explicit
-item, description, price, quantity and client approval evidence. Item finance tracking
-now reports invoice references, outstanding amounts, cash allocation and sent state.
-Procurement reports of supplier refunds remain evidence; verified ledger receipts
-post actual money. Application migrations were approved and applied on 2026-09-15; frontend work remains pending.
+Ledger runtime integration has been removed. Finance submission and direct-invoice
+orders return an explicit unavailable response. Tracking reports finance unavailable.
+Quotation approval requests remain procurement-side pending records; official
+quotation issuance remains blocked until a new approval integration is agreed.
+Waybills and nonfinancial procurement workflows remain available.
+
+## Restored non-tax ledger integration — 2026-11-05
+
+The reset-only unavailability descriptions above are superseded: quotation revisions
+can be approved/rejected in the scoped Accounts inbox. Official quotation generation
+and recording as sent require that revision's approval. Finance requests can be
+submitted; invoice imports and supplier bill imports post source values once. Other
+finance requests can be reviewed without claiming a payment. The approved invoice
+line lookup (`lookups/?kind=invoice-lines`) supports direct invoice-to-PO ordering.
+Delivery outcomes recognize linked revenue only for accepted goods. Tax calculations
+are not added to ledger. Existing procurement source-document calculations are not
+changed by this ledger integration. See [ledger contracts](ledger.md).

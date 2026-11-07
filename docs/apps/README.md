@@ -11,8 +11,8 @@ deployed environment or every integration has passed acceptance testing.
 | CRM           | Implemented Party-centred master data and protected records    | [CRM](crm.md)                     |
 | Tasks         | Implemented assignments, lifecycle, comments and reminders     | [Tasks](tasks.md)                 |
 | Notifications | Implemented inbox/outbox; WhatsApp transport unconfigured      | [Notifications](notifications.md) |
-| Procurement   | Backend built; ledger integrated and migrated; frontend pending     | [Procurement](procurement.md)     |
-| Ledger        | Backend built and migrated; configuration pending                                   | [Ledger](ledger.md)               |
+| Procurement   | Backend built; scoped ledger approvals/imports restored     | [Procurement](procurement.md)     |
+| Ledger        | Cash book, party ledgers, reconciliation and currency accounts                                   | [Ledger](ledger.md)               |
 
 Reports are future scope, not a registered Django application.
 Read [shared API conventions](API_CONVENTIONS.md), the

@@ -473,7 +473,6 @@ def create_po(user, data):
             bool(quote) != bool(invoice_id),
             "Select exactly one quotation line or approved invoice line.",
         )
-        invoice_line = None
         if quote:
             same_request(request, quote.item.request)
             check(
@@ -490,14 +489,48 @@ def create_po(user, data):
             )
             item, description, origin = quote.item, quote.description, "QUOTATION"
         else:
-            from ledger.integrations.procurement import direct_invoice_line
+            from ledger.models import ProcurementInvoiceLine, SalesInvoiceItem
 
-            invoice_line = direct_invoice_line(
-                user, request, invoice_id, row["quantity"], row["unit_price"]
+            invoice = (
+                ProcurementInvoiceLine.objects.select_related("link__transaction")
+                .filter(
+                    pk=invoice_id,
+                    link__request=request,
+                    link__transaction__reversal__isnull=True,
+                )
+                .first()
+            )
+            modern = False
+            if invoice is None:
+                invoice = (
+                    SalesInvoiceItem.objects.select_related("invoice", "source_item")
+                    .filter(
+                        pk=invoice_id,
+                        invoice__finance_request__request=request,
+                        invoice__confirmed_revision__isnull=False,
+                        invoice__posted_transaction__isnull=True,
+                    )
+                    .first()
+                )
+                modern = invoice is not None
+            check(
+                invoice is not None, "Select an active invoice line for this request."
+            )
+            check(
+                invoice.po_line_id is None,
+                "This invoice line already has a purchase order.",
+            )
+            check(
+                row["quantity"] == invoice.quantity
+                and (row["unit_price"] * row["quantity"]).quantize(
+                    Decimal(".01"), rounding=ROUND_HALF_UP
+                )
+                == invoice.amount,
+                "Purchase order must match the invoice quantity and goods value.",
             )
             item, description, origin = (
-                invoice_line.item,
-                invoice_line.description,
+                invoice.source_item if modern else invoice.item,
+                invoice.description if modern else invoice.item.description,
                 "INVOICE",
             )
         line = make(
@@ -509,17 +542,9 @@ def create_po(user, data):
             origin=origin,
             **row,
         )
-        if invoice_line:
-            from ledger.models import InvoiceOrderLink
-
-            make(
-                InvoiceOrderLink,
-                user,
-                line=invoice_line,
-                po_line=line,
-                quantity=line.quantity,
-                evidence=obj.evidence or obj.reference,
-            )
+        if invoice_id:
+            invoice.po_line = line
+            invoice.save(update_fields=["po_line"])
         attempt = make(
             m.FulfilmentAttempt,
             user,
@@ -674,6 +699,20 @@ def dispatch(user, obj):
             generated.version.register.delivery_id == obj.pk,
             "The generated waybill belongs to another delivery.",
         )
+    from ledger.models import ProcurementInvoiceLine
+
+    for delivery_line in obj.lines.select_related(
+        "receipt_line__purchase_line__attempt"
+    ):
+        po_line_id = delivery_line.receipt_line.purchase_line.attempt.po_line_id
+        invoices = ProcurementInvoiceLine.objects.filter(po_line_id=po_line_id)
+        if (
+            invoices.exists()
+            and not invoices.filter(link__transaction__reversal__isnull=True).exists()
+        ):
+            raise ValidationError(
+                "The linked invoice was cancelled. Record its replacement before dispatch."
+            )
     obj.dispatched_at = timezone.now()
     obj.save(update_fields=["dispatched_at"])
     for line in obj.lines.all():
@@ -749,6 +788,9 @@ def record_outcome(user, delivery, data):
                     document=obj.signed_waybill,
                     occurred_at=occurred,
                 )
+    from ledger.procurement_bridge import sync_acceptance
+
+    sync_acceptance(request, user, occurred.astimezone(ZoneInfo("Africa/Lagos")).date())
     return obj
 
 

@@ -4,12 +4,8 @@ These are approved design directions, not implemented API contracts or permissio
 to start development. Current behaviour is in [app docs](../apps/README.md).
 
 - [Procurement](PROCUREMENT.md): client requests through purchasing and delivery.
-- [Ledger](LEDGER.md): double-entry foundation, flexible invoices, client withholding, tax records,
-  advances, reconciliation and build strategy.
-- [Ledger backend specification](LEDGER_BACKEND.md): approved backend design for models, accounting
-  invariants, permissions, API contracts, integration changes and acceptance checks.
-  Includes the client **Reconciliation and Statement** feature. Backend implementation
-  is documented in [ledger app contracts](../apps/ledger.md); rollout is pending.
+- [Ledger rebuild](LEDGER.md): basic cash book; previous designs retired.
+- [Cash-book backend](LEDGER_BACKEND.md): journal, permissions and migration boundary.
 
 Shared ownership is in [architecture](../ARCHITECTURE.md). Resolve material open
 decisions with the user before models, migrations or dependent frontend work.

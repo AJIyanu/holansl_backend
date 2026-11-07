@@ -369,7 +369,7 @@ class ProcurementTests(TestCase):
             HTTP_IDEMPOTENCY_KEY=str(key or uuid4()),
         )
 
-    def test_full_acceptance_and_ledger_available(self):
+    def test_full_acceptance_with_ledger_unavailable(self):
         attempt, offer = self.po()
         delivery = self.receive_deliver(self.purchase(attempt, offer))
         s.record_outcome(
@@ -734,10 +734,6 @@ class ProcurementTests(TestCase):
         self.assertEqual(
             self.post(f"finance-requests/{obj.id}/submit/", {}).status_code, 200
         )
-        from ledger.models import FinanceSubmission, JournalEntry
-
-        self.assertTrue(FinanceSubmission.objects.filter(source=obj).exists())
-        self.assertFalse(JournalEntry.objects.exists())
         self.assertFalse(self.item.events.filter(kind="PAYMENT_RECEIVED").exists())
 
     def test_history_cannot_be_deleted_or_overwritten(self):

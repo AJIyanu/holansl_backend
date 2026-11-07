@@ -79,8 +79,8 @@ class DocumentRegistryTests(TestCase):
     def test_requesting_approval_never_grants_approval(self):
         version = self.quote_document()
         registry.request_approval(self.user, version)
-        self.assertEqual(registry.approval_status(version), "PENDING")
-        with self.assertRaises(registry.IntegrationUnavailable):
+        self.assertEqual(registry.approval_status(version), "AWAITING_LEDGER")
+        with self.assertRaises(ValidationError):
             s.issue_quote(
                 self.user,
                 version.quotation_revision,
@@ -102,7 +102,7 @@ class DocumentRegistryTests(TestCase):
                 f"document-versions/{version.id}/generate/",
                 {"format": "PDF", "draft": False},
             ).status_code,
-            503,
+            400,
         )
 
     def test_invoice_and_receipt_cannot_originate_from_procurement(self):

@@ -1,289 +1,439 @@
-# Ledger application
+# Ledger — cash book, party ledgers and reconciliation
 
-Status: core backend migrated on 2026-09-15; Accounts frontend implemented on
-2026-09-16. New client-rate and cash-holder migrations 0010–0012 await application
-rollout approval. The report name is **Reconciliation and Statement**.
-This page describes implemented contracts and pending deployment requirements.
-Source: [models](../../ledger/models/),
-[services](../../ledger/services/), [serializers](../../ledger/serializers.py).
+## Itemized sales invoices — 2026-11-05
 
-## Accounting and access
+This section supersedes earlier immediate sales-invoice posting and document limitations.
+Sales Ledger **Add invoice** creates an editable, undelivered invoice outside the
+financial ledger. Confirmation allocates `HOL-{client code}-{YYMMDD}-{daily SN}`
+using the Lagos confirmation date, a unique three-letter client code and a company-wide
+daily sequence. Items append `.1`, `.2`, etc. Editing invalidates confirmation;
+previous confirmed revisions remain immutable and printable. The reference is retained.
 
-Ledger owns financial authority and reuses staff identities, assigned permissions,
-CRM parties, procurement sources, document numbering, tasks and notifications.
-NGN is primary; migrations seed NGN, USD and GBP (pound sterling). Additional
-currencies are configurable. Balances remain separate; there is no automatic FX
-conversion. Years run January–December, divided into twelve monthly periods.
+- Items support description, quantity, unit, unit price, removal and ordering.
+  Server-side decimal arithmetic rounds each line half-up to two decimal places.
+- Confirmed invoices can be printed/downloaded as PDF or emailed with a custom/default
+  message and PDF attachment. Client-facing titles and messages say **Invoice**.
+  Documents include billing details, date, references, delivery status, signature
+  spaces, goods subtotal, 7.5% VAT and total. VAT is document-only, never journaled.
+- Mark delivered requires a confirmation and delivery date. It atomically posts the
+  discounted goods subtotal once to sales receivables/deferred revenue and its double-entry journal.
+  Delivery does not imply acceptance: the existing acceptance flow recognizes revenue.
+  No cash movement or payment condition is added. Delivered invoices have no edit action.
+- UUID retry keys and optimistic version checks protect saves, confirmation, delivery
+  and email requests. Email history distinguishes provider acceptance from unknown
+  outcomes; retrying the same key never sends another email. Provider acceptance does
+  not prove inbox delivery. No live email was sent during verification.
+- Procurement invoice imports now create undelivered invoice documents. Their source
+  item details remain linked and fixed; confirmation permits direct PO selection.
+  Existing posted invoices and procurement links remain valid.
 
-Money uses Decimal with HALF_UP rounding per invoice line to currency minor units.
-Journals require at least two one-sided entries and exactly equal debits/credits
-in one currency. PostgreSQL constraints/triggers protect posted journals,
-submitted contents, revisions and histories. Transactions lock periods and currency
-balances. Source events cannot post twice. No financial DELETE API exists.
+Backend routes are under `/ledger/sales-invoices/`: `parties/{party UUID}/`,
+`{invoice UUID}/`, and `{invoice UUID}/{confirm,deliver,email,pdf}/`.
+PDF accepts an optional `revision` UUID. Frontend detail is
+`/dashboard/ledger/sales/invoices/{invoice UUID}`; PDF is relayed through the
+protected `/api/ledger/invoices/{invoice UUID}/pdf` route.
 
-An invoice debits receivables and credits deferred sales plus configured tax
-liability, appearing immediately in the client's statement. Finance recognizes
-sales only against client acceptance. A receipt debits bank/cash and credits
-receivables once; allocating it to invoices never receives the money again.
+Migration **0024** adds invoice documents/items, frozen revisions, client codes,
+daily numbering, operation records and email history. It has been generated and tested
+in disposable databases, but has NOT been applied to the application database.
+Staff require `ledger.view_salesledger` and `ledger.view_salesinvoice`, plus the
+relevant `add_salesinvoice`, `change_salesinvoice`, `confirm_salesinvoice`,
+`deliver_salesinvoice`, `print_salesinvoice` or `email_salesinvoice` permission.
+Delivery additionally requires `add_salestransaction`. Existing permission formatting
+is preserved. Newly created permissions follow the existing executive grant hooks;
+ordinary staff grants must be assigned explicitly. Payments, partial payments and tax
+accounting changes are outside this release. No dependencies were added.
 
-Every `/ledger/` endpoint requires active staff and `ledger.view_financialrecord`.
-Financial objects also require the corresponding type's view permission. Scope
-defaults to the preparer's records. `viewdepartment_financialrecord` includes their
-department; `viewall_financialrecord` supplies full scope. Complete statements,
-tax reports, journals and the central approval queue require full scope.
+## Current scope — approved non-tax completion (2026-11-05)
 
-Permissions include `add_invoice`, `change_invoice`, `approve_invoice`,
-`post_invoice` and equivalents for receipts/payments/expenses/advances/credits.
-Self-approval is allowed with both permissions; exact version/hash, approver,
-timestamp and reason are retained. Role names supply no authorization. Existing
-`format_permission` and additive executive-role provisioning are reused.
-For example `ledger.approve_invoice` formats as `ledger.invoice.approve`.
+The cash book, sales/purchase ledgers, settlement corrections, saved Reconciliation
+and Statement, procurement approval/import, and NGN/USD/GBP accounts are implemented.
+Tax is explicitly excluded: no VAT/WHT calculation, withholding settlement, tax
+accounts or remittance workflow is added. Earlier stage descriptions below are
+historical; this section supersedes their NGN-only and unavailable-feature limits.
+Financial years remain January–December and seeded account balances start at zero.
+All clients/suppliers share transaction tables linked to the CRM party UUID.
 
-All mutations require an `Idempotency-Key` UUID header. Same actor/path/payload/key
-replays the saved result; conflicting reuse returns 409. Permissions and financial
-scope are rechecked on replay. Send decimals as strings and dates in ISO format.
-Unknown/server-owned fields are rejected. Accounting dates cannot be in the future
-in Africa/Lagos. Lists use standard `count/next/previous/results` pagination.
-Errors: 400 validation, 403 permission, 404 absent/inaccessible object, 409 stale
-version/integrity conflict, 503 missing configuration/private storage unavailable.
+### Posting and corrections
 
-## Financial APIs
+- Existing transaction POST accepts NGN, USD or GBP. PAYMENT accepts account_id
+  (defaults to the existing primary NGN cash holder); its active account must match
+  the currency. Invoice/bill posting never creates a cash movement. Sales revenue
+  remains deferred until acceptance. Supplier bills use purchase clearing.
+- GET transactions/outstanding/choices supports currency. Transaction history is
+  year/date filtered with continuous running balances; choices searches all years.
+  Summary charges/payments represent increases/reductions, including corrections.
+- POST `party-ledgers/{kind}/parties/{uuid}/operations/`: request_key UUID, action,
+  date, currency, reason; transaction_id for source-based operations; amount where
+  applicable. ALLOCATE replaces the selected payment's allocations with the supplied
+  `{document_id, amount}` list (empty releases all). No new cash/journal is posted.
+  An earlier advance can settle a later document on an effective date no earlier
+  than either source. Corrections cannot precede existing settlement events.
+- CREDIT reduces a document; REFUND returns unallocated payment value through its
+  original cash/bank account; ADJUST_UP/DOWN posts a reasoned balance correction;
+  REVERSE creates an opposite transaction/journal and opposite cash when applicable.
+  Released allocation links and original records remain immutable. Reversal is
+  supported for invoices, bills, payments and adjustments; linked credit/refund
+  histories require explicit review/adjustment rather than deleting those records.
+- Standalone sales invoices accept DISPATCHED/REJECTED/ACCEPTED evidence and goods
+  value. Acceptance transfers deferred revenue to income without changing cash or
+  the party balance. Accepted goods cannot be cancelled. Dispatched goods must have
+  documented rejection before cancellation. Procurement-linked invoices use actual
+  procurement delivery/outcome evidence, not manual acceptance overrides.
+- Posting/correction services lock the party and serialize submission UUIDs. One
+  database transaction includes related cash, journal, allocations and audit actor.
+  Identical retries return existing results; changed submissions are rejected.
 
-Collections below expose GET list/detail, POST create and draft-only PATCH of
-`description`/`reference` with `expected_version`. Lists are summaries and accept
-`client`, `request`, `status`. Detail adds typed `content`, events, and applicable
-outstanding invoice, settlement-source/unallocated or advance balances.
+### Reconciliation and Statement
 
-| Collection under `/ledger/` | Type-specific creation fields |
-| --- | --- |
-| `invoices/` | `lines`, optional `due_date` |
-| `receipts/`, `payments/` | `amount`, `cash_account`, `purpose`, optional `target` |
-| `supplier-bills/`, `expenses/` | `cost_lines` |
-| `advances/` | `amount`, staff `custodian` |
-| `advance-clearances/` | `advance`, `cost_lines` |
-| `credit-notes/` | `invoice` (typed Invoice UUID), `credit_lines` |
-| `withholdings/` | `line`, `authorization`, `certificate_reference`, `amount` |
-| `tax-remittances/` | `tax_policy`, `period_from`, `period_to`, `amount` |
-| `manual-journals/`, `opening-balances/` | `journal_lines` |
+POST `party-ledgers/{kind}/parties/{uuid}/statements/` accepts request_key,
+date_from/date_to and currency. A frozen snapshot contains company/party identity,
+all selected transactions (not a page), prior balance, charges/reductions, payments,
+running/closing balances and outstanding/advance schedules as of the end date.
+Statement ranges may span financial years. No exchange conversion or mixed-currency
+total is performed. GET that collection lists snapshots; GET `statements/{uuid}/`
+returns the immutable snapshot and review history. POST the detail with request_key,
+status AGREED/DISPUTED and notes records a separate actor/timestamp review.
+Later postings cannot rewrite a saved snapshot. A new snapshot is required to
+present revised figures. Reviews are staff-recorded evidence, not an external client
+signature or automatic proof of agreement.
 
-Common fields: `currency` (code), `policy` (posting-policy UUID), `date`, optional
-CRM `party`, procurement `request`, private `evidence`, `description`, `reference`.
-Party/evidence are mandatory where the operation requires them. Invoice lines use
-`description`, `unit`, `quantity`, `unit_price`, `discount`, optional `item`,
-`quote_line`, `po_line`, `tax_policy` UUIDs. Cost lines use `account`, `amount`,
-`description`, `evidence`, optional `procurement_cost`. Credit lines use `line`,
-`quantity`. Django calculates totals. Manual lines use `account` (AccountCurrency
-UUID), `debit`, `credit`, optional `party` for permitted opening balances.
+### Procurement and account settings
 
-| POST action | Payload and effect |
-| --- | --- |
-| `{id}/submit/` | `expected_version`; freezes content and requests approval |
-| `{id}/approve/`, `{id}/reject/` | `expected_version`, `reason`; exact-revision decision |
-| `{id}/post/` | `expected_version`; validates approval and posts atomically |
-| `{id}/revise/` | Complete new creation payload, `expected_version`, `reason`; new draft linked by `supersedes`, preserves original and supersedes its approval/task |
-| `{id}/reverse/` | `date`, `reason`; opposite journal for supported types |
-| invoice `{id}/cancel/` | `expected_version`, `date`, `reason`, `lines: [{line, quantity}]`; eligible credit draft, still needing approval/posting |
-| invoice/receipt `{id}/generate/` | `format: PDF` or `JPG`; private official files |
-| invoice `{id}/record-sent/` | CRM `recipient`, `method`, `occurred_at`, textual `evidence`; records actual sending, does not send externally |
-| withholding `{id}/remittance-evidence/` | private `document`, `reference`, `verified_on`; retained client-remittance proof, no cash movement |
+GET/POST `procurement-inbox/` requires approve_procurement plus existing procurement
+request visibility. It lists pending quotation approvals, submitted finance requests
+and unposted supplier purchases. APPROVE/REJECT decides a requested quotation revision.
+APPROVE_REQUEST/REJECT_REQUEST reviews other submitted finance requests without moving
+funds. IMPORT_INVOICE/IMPORT_BILL posts source line goods values once, using unique
+source links; the normal sales/purchase view/create permissions remain required.
+Finance submission is available again. An approved invoice line can originate a
+procurement PO without a quote; the full line quantity/value is matched and cannot
+be ordered twice. Delivery acceptance automatically recognizes linked invoice revenue,
+including when the invoice is imported after acceptance. Invoice printing/sending
+and supplier inventory/COGS valuation are not inferred from these posting operations.
 
-Inappropriate actions are rejected. Revised records always require fresh approval.
-Receipt `reference` preserves the verified payment reference separately from its
-assigned official receipt number. Posted invoices use credits, never generic reversal.
+GET/POST/PATCH `accounts/` lists, adds, renames and activates/deactivates cash/bank
+accounts. Currency and account type are fixed once created; use a separate account
+for another currency. NGN is primary, with USD and GBP available. No external bank
+account is opened. Six zero-balance Primary cash/bank records are seeded; existing
+NGN cash entries are attached to Primary NGN cash without changing amounts. Cash-book
+and journal list filters accept currency and optional account UUID. Currency
+registration/exchange conversion and configurable nominal-account charts are separate
+future extensions; current supported currencies are centralized in ledger.models.
 
-## Procurement and cancellation
+### Additional assigned permissions
 
-Invoices can precede purchase/delivery or follow delivery; quotation is optional.
-Associate goods lines with request items. A PO line references either `quote_line`
-or `invoice_line`, with existing client-approval/evidence requirements. Source
-prices and remaining quantities are validated. The procurement migration preserves
-existing quote-based orders and backfills explicit item/description links.
+| Django permission | Frontend permission | Purpose |
+|---|---|---|
+| ledger.correct_salesledger | ledger.salesledger.correct | Sales allocations/corrections |
+| ledger.correct_purchaseledger | ledger.purchaseledger.correct | Purchase allocations/corrections |
+| ledger.recognize_salesledger | ledger.salesledger.recognize | Standalone delivery/acceptance evidence |
+| ledger.approve_procurement | ledger.procurement.approve | Scoped procurement decisions/imports |
+| ledger.view_reconciliation | ledger.reconciliation.view | Read/print saved statements |
+| ledger.add_reconciliation | ledger.reconciliation.create | Create statement snapshots |
+| ledger.confirm_reconciliation | ledger.reconciliation.confirm | Record statement reviews |
+| ledger.view/add/change_ledgeraccount | ledger.ledgeraccount.view/create/edit | Account settings |
 
-POST `recognize-revenue/` takes `line`, `quantity`, `date`. This explicit finance
-action uses recorded accepted quantities and cannot reuse acceptance across invoices
-sharing an order. Dispatch alone does not earn revenue. Standalone invoices without
-procurement acceptance links remain deferred; use linked request items/PO lines
-for the goods-delivery lifecycle.
+Ledger view permission is additionally required for its operations/statements.
+Refund/reversal actions also require cash-book create permission. Preparation and
+approval may be performed by the same authorized staff member; actor/time is retained.
+CEO/CTO access comes from assigned permissions and the existing additive provisioning,
+not role-name bypasses.
 
-Only undelivered or documented rejected quantities can be credited. Accepted goods
-and dispatched goods without an outcome cannot be cancelled. Cancellation requires
-`cancel_invoice` and the applicable credit preparation/approval/posting permissions.
-Receipts remain intact. A credit against a paid invoice becomes client credit;
-refund payment needs separate evidence. Resolve collected/withheld tax through
-its allocation/reversal workflow before crediting that tax component.
+### Rollout and verification
 
-Procurement `finance-requests/{id}/submit/` now creates an Accounts submission
-snapshot without posting money. GET `finance-submissions/` lists snapshots. POST
-`finance-submissions/{id}/prepare/` links a matching draft `record` with a `reason`.
-Accounts needs existing procurement scope to prepare request/item/cost references.
-Actual source costs cannot post twice.
+New migrations 0021–0023 add the accounts, signed effects, dated allocation releases,
+corrections, immutable snapshots/reviews, acceptance and procurement links/decisions.
+0021 seeds accounts before adding the FK and backfills old PAYMENT effects and
+allocation dates, temporarily disabling only their immutability triggers inside the
+migration transaction. It does not erase transactions. PostgreSQL schema locks are
+required: run migrations in an appropriate deployment window after backup.
+No application migrations are executed by this build. Older 0013 remains a destructive
+historical reset; inspect pending migration plans if upgrading a database that has
+not already passed that reset. Do not roll back the new models after live use without
+preserving the new financial/audit records.
 
-Quotation approval uses a real decision against the exact revision/hash. Procurement
-register/download APIs exclude ledger IN/RC records; financial files use ledger
-authorization. Tracking includes invoices, sending evidence and allocation/releases.
+The remaining sections document the earlier rebuild stages and basic cash-book
+correction contract (standalone cash revisions keep their original accounting dates).
 
-## Money and settlement
+## Behaviour
 
-Receipt purposes: `CLIENT`, `ADVANCE_RETURN`, `SUPPLIER_REFUND`. Return/refund targets
-are posted advance/bill FinancialRecord UUIDs. Payment purposes: `BILL`, `EXPENSE`,
-`ADVANCE`, `CLIENT_REFUND`, `TAX_REMITTANCE`. Advance/remittance documents authorize
-money; linked payments post actual bank movements. Expense/bill posting credits
-payables; payment clears it. Clearance credits the staff advance. Funding 50,000,
-clearing 42,000 and returning 8,000 leaves zero outstanding without double costs.
-Supplier refund receipts record returned cash and reopen the related payable;
-cancelling the supplier cost remains a separate correction.
+- Financial years run January 1–December 31. Initial opening balance is zero;
+  existing transactions carry forward into later periods and years.
+- RECEIPT: debit Cash, credit Cash income. EXPENSE: debit Expenses, credit Cash.
+  CAPITAL: debit Cash, credit Capital introduced, so owner funding is not income.
+- Amounts are positive fixed-point NGN values with two decimal places. Each
+  journal row stores one amount, a debit account and a credit account; therefore
+  debit and credit totals are equal by construction. The initial account names
+  are fixed for this feature, not a configurable chart of accounts.
+- Date, description and amount are required; reference is optional. Negative
+  cash balances are permitted and highlighted in the UI, allowing missing earlier
+  receipts to be recorded later. No approval stage or tax calculation is included.
+- Create writes cash entry and journal atomically. An optional UUID request_key
+  makes a repeated identical submission idempotent; the frontend always sends it.
+- Edit requires the current version and a nonblank reason. It locks the entry,
+  reverses the old journal and posts the replacement atomically. Concurrent stale
+  updates are rejected. Delete requires version/reason and voids the entry with a
+  reversal; no financial history is physically deleted.
+- Reversals use the original accounting date, including corrections to previous
+  years. created_at records when the correction was actually entered. Years are
+  not yet closable/locked; historical period totals reflect subsequent corrections.
+- Original creator, last editor, timestamps, reversal reason and journal actor
+  remain recorded. Journal UPDATE/DELETE are also blocked in PostgreSQL.
 
-POST `allocations/`: `source` (SettlementSource UUID), `invoice` (typed Invoice UUID),
-`amount`, `date`, optional `tax_lines: [{line, amount}]`. Invoice detail returns
-`invoice_id`; receipt/credit/withholding detail returns `settlement_source`.
-POST `allocations/{id}/release/`: `amount`, `date`, `reason`. Events are append-only.
-Partial/bulk receipts, overpayments and unallocated money are retained. Cross-client
-or cross-currency allocations fail. Dates cannot precede source/invoice or the
-latest allocation event for that client/currency. Reversals unwind allocations
-without deleting their history.
+## Permissions
 
-## Tax
+Active staff or superusers only. CEO/CTO names provide no access bypass. Use the
+existing staff/role permission editor and additive executive provisioning hooks.
 
-Tax uses ledger control accounts, not an additional physical bank account. No
-statutory rates/exemptions are seeded. Accounts configures the tax type, verified
-policy reference, effective dates, rate and mappings. `CLIENT_REMITTANCE` implements
-the agreed split: collected tax is Holan-remittable, authorized withholding settles
-client debt and is recorded for client remittance. `TAX_CREDIT` uses a separate
-asset and does not automatically reduce invoice-tax liability. Configuration is
-not a legal determination; verify applicability before activation.
+| Operation | Django permission | Frontend permission |
+| --- | --- | --- |
+| Read cash book | ledger.view_cashbookentry | ledger.cashbookentry.view |
+| Create | ledger.add_cashbookentry | ledger.cashbookentry.create |
+| Edit | ledger.change_cashbookentry | ledger.cashbookentry.edit |
+| Delete/void | ledger.delete_cashbookentry | ledger.cashbookentry.delete |
+| Read journal | ledger.view_cashbookjournal | ledger.cashbookjournal.view |
 
-GET/POST `withholding-authorizations/`, POST `{id}/revoke/` manage client/tax-type
-eligibility, evidence, dates and reasons. Assign
-`authorize_clientwithholdingauthorization` to the authorized manager. Revocation
-cannot invalidate posted deductions. Cash allocation explicitly identifies tax
-collected; final settlement must account for all remaining invoice tax. Withholding
-posts separately and never counts as cash. Remittance payment cannot exceed tax
-collected less prior remittances. Later client proof does not change the deduction.
+Mutations require cash-book view permission as well as their action permission.
+Journal access is independently assignable and read-only. HEAD/OPTIONS are also
+permission checked. Backend enforcement is authoritative; frontend pages,
+navigation and Server Actions mirror it. No additional journal permission is
+needed to record an authorized cash transaction.
 
-GET `tax-reports/` with `currency`, `date_from`, `date_to` returns charged, credited,
-net, collected, withheld, remitted, collected-unremitted and client deduction/reversal
-references by policy. All references and original evidence remain available.
+## API
 
-## Reconciliation and Statement
+| Method | Path | Behaviour |
+| --- | --- | --- |
+| GET/POST | /ledger/cash-book/ | List active entries / record entry |
+| GET/PATCH/DELETE | /ledger/cash-book/{uuid}/ | Inspect / correct / void |
+| GET | /ledger/cash-book-journal/ | Paginated journal including reversals |
+| GET | /ledger/cash-book-journal/{uuid}/ | Inspect immutable journal pair |
 
-POST `client-statements/` with `client`, `currency`, `date_from`, `date_to` creates
-an immutable snapshot and returns ID/summary. GET `{id}/` returns paginated rows,
-summary and `page_opening_balance`. POST `{id}/export/` accepts PDF/JPG format.
+Create body: date (ISO), kind (RECEIPT/EXPENSE/CAPITAL), amount (decimal string),
+description, optional reference and request_key. PATCH accepts any editable
+create fields except request_key and requires version plus reason. DELETE body
+contains version and reason. Voided entries remain available by detail ID but
+are excluded from the active cash-book list. Unrelated old ledger routes remain
+removed. PUT and journal mutation endpoints are not supported.
 
-Summary: opening/prior balance, period `invoice_total`, `cash_received_total`,
-`withheld_total`, debit/credit adjustments, closing balance, `balance_due`,
-`credit_held`, as-of invoice outstanding and unallocated sources. Receipt/withholding
-totals show original events; reversals appear separately as adjustments. Rows show
-date, reference, description, debit, credit and running balance. Allocation/reversal
-events after the cutoff cannot rewrite earlier snapshots. A newly generated snapshot
-includes later-entered records dated in its range; saved snapshots remain unchanged.
+List filters: year (defaults to current year), date_from, date_to, page, page_size.
+Dates must fall within the selected year. Standard pagination applies. Records
+sort by accounting date, creation time and UUID. Cash-book results include a
+running_balance calculated across the entire period, not restarted on each page.
+The response summary contains currency, year, date_from/date_to, opening_balance,
+debit, credit and closing_balance; amounts are decimal strings. Opening balance
+includes active entries before the selected start date. Journal entries contain
+amount, debit_account, credit_account, source entry ID and optional reverses ID.
 
-## Configuration, reports and rollout
+## Implementation and rollout
 
-GET list/detail and POST create: `currencies/`, `accounts/`, `account-currencies/`,
-`cash-accounts/`, `posting-policies/`, `tax-types/`, `tax-policies/`. PATCH changes
-only descriptive fields/active status on currencies/accounts/cash accounts/tax
-types, with `reason`. Accounting identities and policy versions cannot be rewritten.
-POST `financial-years/` takes `year`. GET `periods/`; POST `{id}/close/` or
-`{id}/reopen/` takes `expected_version`, `reason`.
+Models: CashBookEntry, CashBookJournal. Domain writes: ledger/services.py.
+HTTP validation/access: ledger/serializers.py, views.py and urls.py.
+Next.js: /dashboard/ledger and /dashboard/ledger/journal.
 
-GET `journals/` and `{id}/` exposes posted journals. GET `trial-balance/` takes
-`currency`, `date_from`, `date_to` and reports period account activity and balanced
-totals, not statutory closing. Manual journals cannot bypass client/supplier/
-advance/tax controls. Opening journals must be the currency's first posting and
-support client receivable starting balances. Detailed legacy supplier/advance
-imports and allocations to legacy opening debts remain outside this implementation.
+0014_initial adds the two new tables/constraints; 0015_cash_journal_immutable adds
+journal protection. They depend on the prior, destructive 0013_reset_ledger_to_blank
+migration. Historical migrations are retained. Applying the chain can remove the
+retired ledger data if 0013 has not run; review the target migration plan and backup
+before an explicitly approved application rollout. No application migration was
+performed during this feature build. Test migrations use local isolated settings.
 
-POST `documents/` accepts multipart `file`, optional `party`, `record`. GET
-`documents/{id}/download/` streams private/no-store authorized content. New uploads
-use private Supabase only; existing documents use their recorded provider without
-fallback. Exports reuse fingerprints. Multi-page failures roll back incomplete
-metadata and attempt uploaded-page cleanup; failed provider cleanup needs operator
-review because storage cannot join the database transaction.
+Tests cover permissions/role grants, validation, duplicate submissions, atomic
+posting, reversals, stale updates, immutable history, year/date filtering, carried
+balances and pagination. No new dependencies or external notifications are needed.
 
-Before use:
+## Party ledgers — stage 1
 
-1. Application rollout completed on 2026-09-15. Applied migrations: ledger `0003`–`0009`,
-   procurement `0006`. Historical ledger `0002` was verified already applied.
-   Future migration plans still require review; fresh isolated tests can run the
-   full history. These migrations
-   seed currencies, add tables/constraints/triggers and backfill PO/document links.
-   They create no business balances.
-2. Configure the existing Accounts department (`LEDGER_ACCOUNTS_DEPARTMENT_ID`, or
-   the department named Accounts), chart, currency/cash accounts, posting mappings,
-   year and verified tax policies. Set `HOLAN_DOCUMENT_OFFICE_ADDRESS` for official
-   files. POST `client-codes/` with `party`, `code` assigns stable document codes.
-3. Assign action/scope permissions. POST `approval-routing/` with `enabled`,
-   `channels`, `reason` requires existing permission to assign tasks to Accounts.
-   System tasks record that standing authorization; task completion is not approval.
-4. Schedule `process_ledger_integrations` to retry durable approval intents.
-   Notifications reuse dashboard/email; WhatsApp remains unavailable. Missing task
-   routing stays queued for retry. GET `capabilities/` exposes configuration readiness.
+Sales and purchase ledger workspaces now provide party lookup and remembered
+selection only. Financial transactions, balances, invoice/bill/payment entry,
+printing and reconciliation remain future stages.
 
-No new Python dependency was added for ledger. Existing Django/DRF/PostgreSQL,
-ReportLab, pypdfium2, Pillow and CRM storage adapters are reused. Ledger tests cover
-accounting, permissions, histories, procurement, mocked private exports and competing
-writes. Live storage/email delivery and application databases are not test targets.
+- GET /ledger/party-ledgers/{sales|purchase}/ returns kind and selected_party
+  (null if unset or no longer eligible).
+- PUT on the same path takes {"party_id": "UUID"} or null to clear. Selection is
+  always scoped to request.user; callers cannot choose another user's settings.
+  Repeating the same selection updates one row, with no financial side effects.
+- GET /ledger/party-ledgers/{sales|purchase}/parties/?search=... provides standard
+  pagination and case-insensitive name search (maximum 100 characters).
+- Only id, display_name, entity_kind and status are exposed. Sales uses active
+  CLIENT roles; purchase uses active SUPPLIER roles. A party can appear in both.
+  Archived/merged parties are excluded, following CRM directory conventions.
+  Other CRM statuses remain visible with their labels for viewing purposes.
+- Access requires active staff (or superuser) and ledger.view_salesledger or
+  ledger.view_purchaseledger respectively. Frontend strings are
+  ledger.salesledger.view and ledger.purchaseledger.view. These grant minimal
+  ledger lookup access, not full CRM editing or sensitive CRM data access.
+- Personal selection uses the matching view permission; it is not a financial
+  mutation. No invoice/payment permissions are introduced at this stage.
+- PartyLedgerSelection has a unique user/kind key and references existing CRM
+  parties; it does not duplicate client/supplier records. Deleting a referenced
+  party clears the preference. Eligibility is rechecked on every read/save.
 
-## Verified migration rollout — 2026-09-15
+Migration 0016_partyledgerselection adds the preference table and two custom view
+permissions through normal Django permission creation. Existing executive hooks
+handle new permissions additively. No live migration was run during development.
 
-The user explicitly approved final validation, migration-plan review and application
-migration execution. Applied procurement `0006` and ledger `0003`–`0009` successfully.
-Ledger `0001`/`0002` were already applied; no historical removal was run. The PO and
-registry backfills each had zero existing rows. No pending migrations remain.
-NGN/USD/GBP are seeded; 221 new permissions were granted to CEO/CTO, preserving
-existing grants. Financial-record and journal counts remain zero.
+## Party ledgers — stage 2 posting foundation
 
-Validation: the isolated fresh-database suite ran 283 tests, with one existing
-logout assertion expecting 401 instead of the configured 403. That test now also
-requires the `token_revoked` error. A final isolated run of ledger plus logout
-passed all 30 tests, including three added edge-case tests. Ledger/procurement
-Ruff checks, formatting, Django system checks, migration consistency and local
-Markdown links passed. Global schema generation still reports existing serializer
-inference diagnostics in accounts/notifications; none originate in ledger. The
-whole-project Ruff run also found pre-existing issues outside changed feature code.
-Accounts setup, frontend work and live provider delivery remain separate steps.
+Stage 2 adds immutable PartyLedgerTransaction records, a protected internal posting
+service, transaction history and NGN balance summaries. Stage 3 now exposes
+invoice/bill/payment entry through the protected posting endpoint described below. No live transactions were created during testing.
+
+`ledger.party_posting.post_party_transaction(actor=..., payload=...)` validates
+request_key (required UUID), party_id, ledger_kind, transaction_type, currency,
+date, amount, description and optional reference. NGN is currently the only
+accepted currency, matching the existing cash book; unsupported currencies fail
+explicitly. Adding currencies and separate currency cash accounts remains future
+work. Amounts are positive decimals with at most two decimal places.
+
+The internal account mapping is:
+
+| Transaction | Debit | Credit | Cash book |
+| --- | --- | --- | --- |
+| Sales invoice | Receivable | Deferred revenue | None |
+| Supplier bill | Purchase clearing | Payable | None |
+| Client payment | Cash | Receivable | Money in |
+| Supplier payment | Payable | Cash | Money out |
+
+An invoice does not recognize earned sales before acceptance. Supplier bills use
+a clearing account pending the later document/classification workflow. This is
+posting infrastructure, not complete VAT, delivery acceptance, inventory costing,
+invoice issuance or settlement allocation. A payment without charges produces an
+advance/credit balance. Payments do not recognize a second sale or expense.
+
+The existing paired journal supports both cash and noncash postings. Every party
+transaction has exactly one journal pair when created through the service. Cash
+payments create one linked cash entry in the same database transaction. Any
+failure rolls back all writes. A party row lock serializes concurrent posting;
+a unique request UUID and full normalized-payload/actor comparison make retries
+idempotent. Reusing the key for changed input fails; concurrent same-input retries
+return the same transaction. Unique-key conflict handling also rolls back any
+cash entry prepared for a conflicting request.
+
+Posting requires active staff/superuser plus ledger.view_salesledger and
+ledger.add_salestransaction, or the purchase equivalents. Payments additionally
+require ledger.add_cashbookentry. Frontend formatted posting permissions are
+ledger.salestransaction.create and ledger.purchasetransaction.create; these are
+used by the stage 3 forms. Posting only accepts an active party with the
+matching active CRM role. Existing transactions can still be read when that role
+or status changes, and historical parties remain available in ledger selection.
+
+GET /ledger/party-ledgers/{sales|purchase}/parties/{uuid}/transactions/ is protected
+by the matching ledger view permission and scoped to an eligible/historical party.
+It supports year/date_from/date_to/page/page_size and currency=NGN. Results contain
+posting details, the journal accounts, author and running_balance. The summary
+contains opening_balance, charges, payments and closing_balance. Balances are
+amounts due (client owes Holan for sales; Holan owes supplier for purchases).
+Negative means advance/credit. Opening includes transactions before the selected
+start date. Pagination does not restart running balances. POST is available as described in stage 3; PATCH/DELETE remain unavailable.
+
+Migrations 0017 and 0018 add transaction storage, journal references/account-pair
+support, permissions and database guards. Journal records remain immutable;
+party transactions cannot be updated/deleted. Cash-book edits/deletions of linked
+payments are denied by the service and database, and hidden in the UI. Standalone
+cash entries retain their current correction workflow. Later corrections/refunds
+must use a dedicated party-ledger workflow rather than breaking these links.
+
+No application migration was run. These migrations preserve existing cash-book
+records; the earlier reset migration remains destructive if still unapplied.
+
+## Party ledgers — stage 3 entry and payment allocation
+
+The sales/purchase transaction collection now accepts POST. The selected route
+party UUID and ledger kind are authoritative; payload values cannot redirect a
+posting into another party's ledger. View permission and the corresponding
+add_salestransaction/add_purchasetransaction permission are required. Payments
+also require add_cashbookentry. Nonstaff/inactive users are denied. PATCH/DELETE
+remain unavailable pending the dedicated correction workflow.
+
+All parties still share one PartyLedgerTransaction table with a CRM Party UUID
+foreign key. PartyPaymentAllocation is one shared relationship table linking
+payments to invoice/bill records; no per-client or per-supplier tables are created.
+
+Entry fields: required request_key UUID, transaction_type (INVOICE for sales,
+BILL for purchases, PAYMENT for either), date, amount, description, currency=NGN
+and reference. Reference is required for public invoice/bill entry and optional
+for payments. The reference is checked case-insensitively within party/ledger/
+document type under the party posting lock. Reusing the same submission ID with
+identical normalized input returns its existing posting; changed input fails.
+The posting API records document totals; it does not generate itemized invoice
+PDFs or calculate tax, withholding, inventory cost or delivery acceptance.
+
+Payments optionally include allocations: a list of {document_id, amount}, maximum
+100 distinct documents. Each amount must be positive, cannot exceed the document's
+current outstanding amount, and total allocations cannot exceed the payment.
+Documents must match party, ledger and currency and be dated no later than the
+payment. Allocation order does not affect duplicate-submission detection. A
+payment may be partially allocated or entirely unallocated as an advance. Applying
+an already-posted advance to a later document is not yet exposed by this API;
+no duplicate cash payment should be created to achieve that future operation.
+
+GET /ledger/party-ledgers/{sales|purchase}/parties/{uuid}/outstanding/ lists unpaid
+NGN invoice/bill records across years, with name/reference search and standard
+pagination. Returns id, date, reference, description, amount and outstanding.
+Transaction history includes remaining_amount: current outstanding on invoices/
+bills or currently unallocated on payments. These current settlement values are
+separate from the selected-period running account balance.
+
+Party transaction, cash entry, paired journal and allocation rows are written in
+one atomic operation. The existing party row lock serializes allocation checks.
+Database insertion guards independently enforce matching source/type/currency/
+date and payment/document limits; allocation records are immutable. Any failure
+rolls back the entire posting. Allocating a payment does not add another cash
+movement or change the party account balance a second time.
+
+Migrations 0019/0020 add the normalized allocation request snapshot, shared link
+table/constraints and database guards. No existing financial records are rewritten;
+existing payments start unallocated. Application migrations were not run during
+development. Tests include cross-party rejection, duplicate references, permission
+checks, partial/multiple allocations, advances, rollback and competing payments.
+
+## Invoice document presentation
+
+Invoice previews and confirmed PDFs use the supplied invoice layout: company
+logo/contact details at the upper right, billing metadata, S/N/items/price/quantity/
+amount columns, subtotal, VAT, total and separate client (left) and Holan Mgt
+(right) signature/date blocks. Billing name and address each start below the
+Billed to label. Company contacts come from `PROCUREMENT_DOCUMENT_COMPANY`; blank
+phone values use the supplied WhatsApp numbers 2348073033767 and 2348090964567
+(including historical snapshots without rewriting them). Invoice detail GET returns
+that public `company` object for the frontend preview.
+
+Item references such as `HOL-ABC-261107-001.1` remain internal identifiers in
+immutable snapshots and staff reference details. Client documents display only
+item S/N (`1`, `2`, …); the invoice number remains in document metadata. Historical
+snapshots render using the same S/N rule without rewriting stored data. Downloaded
+PDFs and emailed attachments share `render_invoice_pdf`.
 
 
-## Accounts frontend and client rates — 2026-09-16
+## Invoice units and percentage discounts
 
-The companion frontend now implements `/dashboard/ledger/[[...segments]]` with
-server access checks and the authenticated `/api/ledger/[...path]` proxy. Screens
-include approvals/procurement submissions, invoices, receipts, payments, expenses,
-advances, withholding, journals, account books, Reconciliation and Statement,
-analytics, document generation/upload and settings. Existing staff/role screens
-remain the permission-management authority.
+Invoice forms offer common SI/count/packaging/time units and a custom short-form
+option. Existing item quantity/unit columns are reused. Documents display compact
+quantities (4 pcs, 1.25 kg) without padding to four decimal places. Legacy long
+unit names are abbreviated for display; custom values are preserved.
 
-New migrations 0010–0012 are additive and must be applied before this frontend is
-used with these backend changes. They add client withholding treatment/rate/credit
-account, deduction rate/net-base snapshots and optional cash-account custodian.
-They preserve existing VAT authorizations and do not post balances or approve clients.
+Invoice create/edit accepts optional `discount_percent` (default zero, up to two
+decimal places, 0–100). The discounted goods total must remain positive and within
+the existing monetary limit, so a 100% discount is rejected. For each line, quantity
+× original unit price is rounded half-up to cents, then its percentage discount
+is rounded half-up to cents and deducted. Item `amount` and invoice `subtotal`
+store the resulting net values; original unit prices remain unchanged. The
+invoice-wide discount amount is the sum of the per-line discounts, avoiding
+rounding drift. VAT (7.5%) is calculated on the net subtotal and remains document-only.
 
-Client authorization accepts `treatment` (`VAT` for compatibility, or `INCOME_WHT`),
-`rate` (business default **2.5**, not a statutory claim), and `credit_account` (required
-active asset for income WHT). Managers use the existing authorize permission and
-full scope. Rate changes use revoke/new authorization with dates, evidence and
-reason; old posted rates stay attached to their deductions. For `INCOME_WHT`, a
-withholding write optionally supplies `taxable_base` (defaults to invoice line net),
-and `amount` must equal that base times the approved percentage, currency-rounded.
-Posting rejects expired/revoked authorization, changed rates, duplicate/excess bases
-and deductions above invoice outstanding. Income WHT debits the credit asset, never
-VAT payable. Tax reports expose income credits separately in `income_wht`.
+No discount columns or unit tables are added. Nonzero discount percentages are
+retained in the existing immutable CREATE/EDIT `InvoiceOperation.payload`; confirmed
+`InvoiceRevision.snapshot` records `discount_percent`, `gross_subtotal`,
+`discount_amount`, per-item `gross_amount`, net `amount`, VAT and total. Missing
+legacy discount metadata means zero. Invoice detail GET additionally returns a
+`pricing` object with discount_percent, gross_subtotal, discount_amount, vat and
+total for editing and preview. Retrying a historical zero-discount submission
+remains compatible; changed discount input requires a new submission key.
 
-`GET journals/` accepts `date_from`, `date_to`, currency code, account-currency UUID,
-source `kind` and reference `search`; results include account names/codes.
-Financial lists also accept dates/currency and receipts/payments accept `cash_account`.
-`GET account-book/` requires account-currency UUID, currency and date range and returns
-paginated rows with running debit-positive balances plus exact opening/closing totals.
-`GET analytics/` requires currency/date range and aggregates all posted journal lines,
-not list pages. Both require journal view and full financial scope. Monthly income
-reflects acceptance recognition; currencies are never summed or converted.
-
-`GET lookups/?kind=...` provides paginated, permission-checked form choices, including
-scoped procurement references. Cash-account setup/edit accepts optional active staff
-`custodian`. Accounting identifiers and currency precision remain immutable after
-creation; descriptive currency fields and active status can be edited with a reason.
-
-Outstanding operational step: review/apply pending migrations, configure the income
-WHT credit account/type, and verify the rendered authenticated workflows with staff.
-No application migration or live financial posting is implied by source-code checks.
+Previews/PDFs show gross line values, gross subtotal, a discount deduction and net
+subtotal when the rate is positive; zero-discount documents omit the discount row.
+Downloads and emailed attachments use confirmed snapshots. Delivery posts only
+net goods amounts to the existing sales/journal flow; procurement-linked item
+identities, quantities and source prices remain protected while net values flow
+into ProcurementInvoiceLine and acceptance/recognition. No cash movement is added.

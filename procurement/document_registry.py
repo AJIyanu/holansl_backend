@@ -18,9 +18,16 @@ class IntegrationUnavailable(APIException):
 
 
 def require_ledger_approval(revision):
-    from ledger.integrations.procurement import require_quotation_approval
+    from ledger.models import ProcurementApproval
 
-    return require_quotation_approval(revision)
+    if not ProcurementApproval.objects.filter(
+        revision=revision, approved=True
+    ).exists():
+        from rest_framework.exceptions import ValidationError
+
+        raise ValidationError(
+            "Accounts approval is required before issuing this revision."
+        )
 
 
 def permission(user, codename):
@@ -195,25 +202,20 @@ def request_approval(user, version):
                 quote_revision=version.quotation_revision,
                 reason="Awaiting ledger integration; this is not approval.",
             )
-    from ledger.integrations.procurement import submit_quotation
-
-    submit_quotation(user, version)
     return version
 
 
 def approval_status(version):
     if version.register.kind == "WB":
         return "NOT_REQUIRED"
-    from ledger.models import ApprovalRequest
+    from ledger.models import ProcurementApproval
 
-    approval = ApprovalRequest.objects.filter(
-        quotation_revision=version.quotation_revision
+    decision = ProcurementApproval.objects.filter(
+        revision_id=version.quotation_revision_id
     ).first()
-    return (
-        approval.status
-        if approval
-        else ("AWAITING_LEDGER" if version.approval_requested_at else "DRAFT")
-    )
+    if decision:
+        return "APPROVED" if decision.approved else "REJECTED"
+    return "AWAITING_LEDGER" if version.approval_requested_at else "DRAFT"
 
 
 def fingerprint(version):
