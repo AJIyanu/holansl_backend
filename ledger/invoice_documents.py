@@ -19,6 +19,7 @@ from .invoice_units import display_quantity
 
 
 def render_invoice_pdf(snapshot):
+    receipt = snapshot.get("title") == "Receipt"
     output = BytesIO()
     width = A4[0] - 88
     navy = colors.HexColor("#04035e")
@@ -73,7 +74,7 @@ def render_invoice_pdf(snapshot):
         _, height = block.wrap(width, 60)
         block.drawOn(canvas, 44, top - 103 - height)
         canvas.setFont("HolanBold", 21)
-        canvas.drawRightString(right, top - 184, "INVOICE")
+        canvas.drawRightString(right, top - 184, "RECEIPT" if receipt else "INVOICE")
         canvas.setFont("Holan", 7)
         canvas.drawRightString(right, 23, f"Page {document.page}")
         canvas.restoreState()
@@ -84,14 +85,30 @@ def render_invoice_pdf(snapshot):
         )
         return f"{symbol}{Decimal(value):,.2f}"
 
-    story = [paragraph("Billed to:"), paragraph(snapshot["billed_to"])]
+    story = [
+        paragraph("Received from:" if receipt else "Billed to:"),
+        paragraph(snapshot["billed_to"]),
+    ]
     if snapshot["billing_address"]:
         story.append(paragraph(snapshot["billing_address"]))
     story += [
         paragraph("Date: " + snapshot["date"]),
-        paragraph("Invoice No: " + snapshot["reference"]),
+        paragraph(
+            ("Receipt No: " if receipt else "Invoice No: ") + snapshot["reference"]
+        ),
         Spacer(1, 20),
     ]
+    if receipt:
+        for label, value in [
+            ("Payment method", snapshot["payment_method"].replace("_", " ")),
+            ("Receiving account", snapshot["account_name"]),
+            ("Bank", snapshot["bank_name"]),
+            ("Payment reference", snapshot["payment_reference"]),
+            ("Invoice reference", snapshot["invoice_reference"]),
+        ]:
+            if value:
+                story.append(paragraph(f"{label}: {value}"))
+        story.append(Spacer(1, 12))
     heading = ParagraphStyle(
         "table-heading",
         fontName="HolanBold",
@@ -173,9 +190,35 @@ def render_invoice_pdf(snapshot):
             [paragraph("Net subtotal"), number(money(snapshot["subtotal"]))],
         ]
     total_rows += [
-        [paragraph("VAT (7.5%)"), number(money(snapshot["vat"]))],
         [
-            Paragraph("TOTAL", heading),
+            paragraph(
+                "VAT paid (7.5%)"
+                if receipt and snapshot["vat_paid"]
+                else "VAT not paid"
+                if receipt
+                else "VAT (7.5%)"
+            ),
+            number(money(snapshot["vat"])),
+        ]
+    ]
+    if receipt:
+        total_rows += [
+            [
+                paragraph(
+                    "Withholding tax (2%)"
+                    if snapshot["withholding_applied"]
+                    else "Withholding tax not applied"
+                ),
+                number(
+                    "−" + money(snapshot["withholding"])
+                    if snapshot["withholding_applied"]
+                    else money("0")
+                ),
+            ]
+        ]
+    total_rows += [
+        [
+            Paragraph("AMOUNT RECEIVED" if receipt else "TOTAL", heading),
             Paragraph(escape(money(snapshot["total"])), total_style),
         ],
     ]
@@ -197,6 +240,11 @@ def render_invoice_pdf(snapshot):
     story.append(KeepTogether([totals]))
     if snapshot["notes"]:
         story += [Spacer(1, 14), paragraph(snapshot["notes"])]
+    if receipt:
+        story += [
+            Spacer(1, 16),
+            paragraph("Amount received in words: " + snapshot["amount_in_words"]),
+        ]
     signature_style = ParagraphStyle(
         "signature", fontName="Holan", fontSize=9, leading=13, alignment=1
     )

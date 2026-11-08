@@ -301,6 +301,20 @@ def operate(*, actor, party_id, kind, payload):
                 else (other, counterpart)
             )
         cash = None
+        receipt_correction = (
+            source
+            and hasattr(source, "receipt_document")
+            and action in ("REFUND", "REVERSE")
+        )
+        refund_vat, refund_wht = Decimal("0"), Decimal("0")
+        if receipt_correction and action == "REFUND":
+            from .receipt_accounting import refund_split
+
+            refund_vat, refund_wht = refund_split(source, amount)
+            if amount + refund_vat - refund_wht <= 0:
+                raise ValidationError(
+                    "This refund rounds to zero cash after withholding. Choose a larger goods amount."
+                )
         if action == "REFUND" or (action == "REVERSE" and source.cash_entry_id):
             original = source.cash_entry
             cash = CashBookEntry.objects.create(
@@ -308,7 +322,11 @@ def operate(*, actor, party_id, kind, payload):
                 currency=original.currency,
                 date=d["date"],
                 kind="EXPENSE" if original.kind != "EXPENSE" else "RECEIPT",
-                amount=amount,
+                amount=(
+                    original.amount
+                    if action == "REVERSE"
+                    else amount + refund_vat - refund_wht
+                ),
                 description=d["reason"],
                 reference=source.reference,
                 created_by=actor,
@@ -330,19 +348,31 @@ def operate(*, actor, party_id, kind, payload):
             reverses=source if action == "REVERSE" else None,
             cash_entry=cash,
         )
-        CashBookJournal.objects.create(
-            party_transaction=record,
-            entry=cash,
-            currency=record.currency,
-            date=record.date,
-            amount=amount,
-            debit_account=debit,
-            credit_account=credit,
-            description=d["reason"],
-            reason=d["reason"],
-            actor=actor,
-            reverses=source.journal if action == "REVERSE" else None,
-        )
+        if receipt_correction:
+            from .receipt_accounting import correction_journals
+
+            correction_journals(
+                record=record,
+                source=source,
+                action=action,
+                vat=refund_vat,
+                withholding=refund_wht,
+                actor=actor,
+            )
+        else:
+            CashBookJournal.objects.create(
+                party_transaction=record,
+                entry=cash,
+                currency=record.currency,
+                date=record.date,
+                amount=amount,
+                debit_account=debit,
+                credit_account=credit,
+                description=d["reason"],
+                reason=d["reason"],
+                actor=actor,
+                reverses=source.journal if action == "REVERSE" else None,
+            )
         if action == "CREDIT" and kind == "sales":
             recognize(
                 source,

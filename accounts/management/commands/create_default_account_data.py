@@ -1,5 +1,5 @@
 from django.contrib.auth.models import Permission
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
 from accounts.models import Department, Role
@@ -148,10 +148,24 @@ class Command(BaseCommand):
     @transaction.atomic
     def handle(self, *args, **options):
         for department_data in DEPARTMENTS:
+            # Codes are stable identifiers; names may have been edited by staff.
+            department = Department.objects.filter(code=department_data["code"]).first()
+            if department is not None:
+                self.stdout.write(f"Department already exists: {department.name}")
+                continue
+
+            if Department.objects.filter(name=department_data["name"]).exists():
+                raise CommandError(
+                    f"Cannot seed department {department_data['name']!r} with code "
+                    f"{department_data['code']!r}: that name already uses another "
+                    "code. Reconcile the existing department before rerunning; "
+                    "no department records have been changed."
+                )
+
             department, created = Department.objects.get_or_create(
-                name=department_data["name"],
+                code=department_data["code"],
                 defaults={
-                    "code": department_data["code"],
+                    "name": department_data["name"],
                     "description": department_data["description"],
                 },
             )

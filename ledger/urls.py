@@ -18,6 +18,8 @@ from .workspace_api import (
 
 from .invoice_api import InvoiceListView, InvoiceView, InvoiceActionView, InvoicePDFView
 
+from .receipt_api import ReceiptListView, ReceiptView, ReceiptPDFView, ReceiptEmailView
+
 from .views import CashBookViewSet, CashBookJournalViewSet
 
 router = DefaultRouter()
@@ -26,6 +28,10 @@ router.register(
     "cash-book-journal", CashBookJournalViewSet, basename="cash-book-journal"
 )
 urlpatterns = [
+    path("sales-receipts/parties/<uuid:party_id>/", ReceiptListView.as_view()),
+    path("sales-receipts/<uuid:pk>/", ReceiptView.as_view()),
+    path("sales-receipts/<uuid:pk>/pdf/", ReceiptPDFView.as_view()),
+    path("sales-receipts/<uuid:pk>/email/", ReceiptEmailView.as_view()),
     path("sales-invoices/parties/<uuid:party_id>/", InvoiceListView.as_view()),
     path("sales-invoices/<uuid:pk>/", InvoiceView.as_view()),
     path("sales-invoices/<uuid:pk>/pdf/", InvoicePDFView.as_view()),

@@ -115,6 +115,8 @@ class CashBookJournal(models.Model):
                         "DEFERRED_REVENUE",
                         "PURCHASE_CLEARING",
                         "ADJUSTMENT",
+                        "VAT_PAYABLE",
+                        "WHT_RECEIVABLE",
                     ],
                     credit_account__in=[
                         "CASH",
@@ -126,6 +128,8 @@ class CashBookJournal(models.Model):
                         "DEFERRED_REVENUE",
                         "PURCHASE_CLEARING",
                         "ADJUSTMENT",
+                        "VAT_PAYABLE",
+                        "WHT_RECEIVABLE",
                     ],
                 ),
                 name="cashjournal_valid_accounts",
@@ -660,6 +664,82 @@ class InvoiceEmail(models.Model):
             ("SENDING", "Sending"),
             ("SENT", "Accepted by email provider"),
             ("UNKNOWN", "Delivery not confirmed"),
+        ],
+    )
+    provider_message_id = models.CharField(max_length=255, blank=True)
+    pdf_sha256 = models.CharField(max_length=64)
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    created_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        default_permissions = ()
+        ordering = ["-created_at", "-id"]
+
+
+class SalesReceipt(models.Model):
+    """Confirmed acknowledgement and immutable snapshot of one sales payment."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    request_key = models.UUIDField(unique=True)
+    party = models.ForeignKey("crm.Party", on_delete=models.PROTECT)
+    invoice = models.ForeignKey(
+        SalesInvoice, null=True, blank=True, on_delete=models.PROTECT
+    )
+    transaction = models.OneToOneField(
+        PartyLedgerTransaction,
+        on_delete=models.PROTECT,
+        related_name="receipt_document",
+    )
+    reference = models.CharField(max_length=40, unique=True)
+    date = models.DateField(db_index=True)
+    currency = models.CharField(max_length=3, choices=CURRENCIES)
+    subtotal = models.DecimalField(max_digits=18, decimal_places=2)
+    vat = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    withholding = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    received = models.DecimalField(max_digits=18, decimal_places=2)
+    snapshot = models.JSONField()
+    submission = models.JSONField()
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-date", "-created_at", "-id"]
+        default_permissions = ("view", "add")
+        permissions = [
+            ("print_salesreceipt", "Can print sales receipts"),
+            ("email_salesreceipt", "Can email sales receipts"),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(
+                    subtotal__gt=0, vat__gte=0, withholding__gte=0, received__gt=0
+                ),
+                name="receipt_positive_amounts",
+            ),
+            models.CheckConstraint(
+                condition=Q(received=F("subtotal") + F("vat") - F("withholding")),
+                name="receipt_balanced_amounts",
+            ),
+        ]
+
+
+class ReceiptEmail(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    request_key = models.UUIDField(unique=True)
+    receipt = models.ForeignKey(
+        SalesReceipt, on_delete=models.PROTECT, related_name="emails"
+    )
+    destination = models.EmailField()
+    subject = models.CharField(max_length=250)
+    message = models.TextField(max_length=10000)
+    status = models.CharField(
+        max_length=10,
+        default="SENDING",
+        choices=[
+            ("SENDING", "Sending"),
+            ("SENT", "Provider accepted"),
+            ("UNKNOWN", "Unknown outcome"),
         ],
     )
     provider_message_id = models.CharField(max_length=255, blank=True)

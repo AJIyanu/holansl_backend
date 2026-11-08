@@ -41,7 +41,7 @@ class PostingInput(serializers.Serializer):
 
 
 @transaction.atomic
-def post_party_transaction(*, actor, payload):
+def post_party_transaction(*, actor, payload, receipt_breakdown=None):
     serializer = PostingInput(data=payload)
     serializer.is_valid(raise_exception=True)
     data = serializer.validated_data
@@ -145,6 +145,15 @@ def post_party_transaction(*, actor, payload):
             raise ValidationError(
                 "An allocation exceeds the document's outstanding amount. Refresh the outstanding documents."
             )
+    vat, withholding = receipt_breakdown or (Decimal("0"), Decimal("0"))
+    if receipt_breakdown is not None and (
+        kind != "sales"
+        or event != "PAYMENT"
+        or vat < 0
+        or withholding < 0
+        or withholding >= data["amount"]
+    ):
+        raise ValidationError("Invalid receipt accounting breakdown.")
     cash = None
     if event != "PAYMENT" and account_id:
         raise ValidationError("An account is only needed for a payment.")
@@ -160,7 +169,7 @@ def post_party_transaction(*, actor, payload):
             account=account,
             currency=data["currency"],
             date=data["date"],
-            amount=data["amount"],
+            amount=data["amount"] + vat - withholding,
             description=data["description"],
             reference=data["reference"],
             kind="RECEIPT" if kind == "sales" else "EXPENSE",
@@ -193,13 +202,29 @@ def post_party_transaction(*, actor, payload):
         party_transaction=record,
         currency=record.currency,
         date=record.date,
-        amount=record.amount,
+        amount=record.amount - withholding,
         debit_account=debit,
         credit_account=credit,
         description=record.description,
         reference=record.reference,
         actor=actor,
     )
+    for amount, debit, credit in [
+        (withholding, "WHT_RECEIVABLE", "RECEIVABLE"),
+        (vat, "CASH", "VAT_PAYABLE"),
+    ]:
+        if amount:
+            CashBookJournal.objects.create(
+                entry=cash,
+                currency=record.currency,
+                date=record.date,
+                amount=amount,
+                debit_account=debit,
+                credit_account=credit,
+                description=record.description,
+                reference=record.reference,
+                actor=actor,
+            )
     PartyPaymentAllocation.objects.bulk_create(
         [
             PartyPaymentAllocation(

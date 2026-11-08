@@ -1,5 +1,96 @@
 # Ledger backend design
 
+## Payment receipts — 2026-11-08
+
+The approved receipt workflow replaces Sales Ledger's Add payment button with
+**Add Payment Receipt** (mobile: **Add Receipt**). This section supersedes earlier
+statements that receipt documents or all tax-related journal accounts are unavailable.
+
+### Confirmation and accounting
+
+A receipt is confirmed directly from the reviewed item draft and posted immediately,
+regardless of delivery. Items support add/remove/reorder, description, quantity, unit,
+unit price and an optional percentage discount, matching invoice rounding. Confirmed
+receipts are immutable: corrections use existing authorized ledger operations rather
+than editing or deleting the original acknowledgement.
+
+VAT-paid and withholding switches default off. VAT is 7.5% of the net goods subtotal;
+withholding is 2% of that same subtotal, before VAT. Cash received = goods + VAT − WHT.
+The sales payment and allocations remain goods-only. For goods of NGN 100,000 with
+both switches enabled, journal totals are:
+
+| Account | Debit | Credit |
+| --- | ---: | ---: |
+| Receiving cash/bank account | 105,500 | |
+| Withholding Tax Receivable | 2,000 | |
+| Client receivable/payment | | 100,000 |
+| VAT Payable | | 7,500 |
+
+The existing paired journal stores this as cash/receivable 98,000,
+WHT receivable/client receivable 2,000 and cash/VAT payable 7,500. They share the
+cash entry and document reference. Total debits equal credits. Receipt confirmation
+never credits Sales again; acceptance-based revenue recognition is unchanged.
+WHT is retained as an asset and VAT as a liability. Tax remittance, statutory returns,
+certificate processing and a separate tax-ledger UI remain outside this release.
+
+Receipt creation, goods payment, cash entry, journal legs and allocation are one
+transaction. A UUID request key plus canonical payload/actor protects retries.
+An invoice link must belong to the same party/currency and retain the copied version.
+Copying an invoice only copies its draft fields and does not modify the invoice.
+If already posted and dated on/before payment, allocate up to outstanding goods value;
+otherwise retain the payment as an advance. Delivery later does not silently allocate
+this advance; the existing allocation action remains available.
+
+Payment methods are Cash, Bank transfer, Card and Cleared cheque. An active account
+in the chosen NGN/USD/GBP currency is mandatory. Cash uses a cash account; other
+methods use a bank account and require the bank name. Only money already received
+should be confirmed. Future receipt dates are rejected. Bank name/payment reference
+are captured in the frozen document, not used to create another bank account.
+
+Existing receipt reversal now reverses actual cash and every journal leg. Refunds
+use cumulative proportional VAT/WHT rounding so a full refund restores all amounts
+without penny drift. Refund input remains goods value; existing allocation-release
+and permission rules apply. A refund rounding to zero cash is rejected for review.
+Ordinary historical payments and purchase-ledger payment flows remain supported.
+
+### Documents and API
+
+Receipt preview adapts `src/templates/InvoiceTemplate.tsx` / `invoice.html` in the
+frontend; PDF reuses the matching backend renderer with **RECEIPT** as the title.
+It includes receiving account/method/bank, invoice link, item S/N, amounts, tax breakdown,
+actual money received and currency-aware amount in words before client/Holan signatures.
+Invoices and receipts share the locked daily sequence and client code, preventing
+reference collisions: `HOL-{client code}-{YYMMDD}-{SN}`. Stored item references append
+`.1`, `.2`, etc.; client documents display only S/N, consistent with invoice policy.
+
+- GET/POST `/ledger/sales-receipts/parties/{party UUID}/`: paginated history / confirm.
+- GET `/ledger/sales-receipts/{receipt UUID}/`: frozen detail and permitted email history.
+- GET `/ledger/sales-receipts/{receipt UUID}/pdf/`: private, no-store PDF.
+- POST `/ledger/sales-receipts/{receipt UUID}/email/`: custom/default professional
+  message and PDF attachment through the existing notification provider.
+- No PATCH/DELETE routes for confirmed receipts.
+
+Creation takes invoice-style fields/items plus `request_key`, `account_id`,
+`payment_method`, `bank_name`, `payment_reference`, `vat_paid`, `withholding_applied`,
+and optional `invoice_id`/`invoice_version`. Values are validated and recalculated
+server-side. Email takes `request_key`, `destination`, optional `subject`/`message`.
+Same-key retries return the previous attempt without resending. Provider acceptance
+is not proof of inbox delivery; unknown outcomes require checking before a new attempt.
+
+Frontend detail: `/dashboard/ledger/sales/receipts/{UUID}`; protected PDF proxy:
+`/api/ledger/receipts/{UUID}/pdf`. Backend permissions are staff +
+`view_salesledger`, `view_salesreceipt`, and `add_salesreceipt`/`print_salesreceipt`/
+`email_salesreceipt` as appropriate. Creation also requires `add_salestransaction`
+and `add_cashbookentry`; copying an invoice requires `view_salesinvoice`.
+Frontend uses the existing `ledger.salesreceipt.create/view/print/email` formatting.
+New executive permissions follow the existing additive hooks; ordinary staff need grants.
+
+Migration **0025_receiptemail_salesreceipt_and_more** adds frozen receipts/email
+history, receipt immutability, amount constraints and the two allowed journal accounts.
+It does not rewrite prior financial records. No dependencies were added. Application
+migration execution and live email delivery are operator actions, not performed during
+implementation verification.
+
 ## Itemized sales invoices — 2026-11-05
 
 This section supersedes earlier immediate sales-invoice posting and document limitations.
