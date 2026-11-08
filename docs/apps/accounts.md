@@ -128,10 +128,10 @@ introduced; the tables come from the installed SimpleJWT package migrations.
 ## Verification
 
 `create_default_account_data` seeds departments by unique code, preserving existing
-names, descriptions, IDs and relationships when a department was renamed. Missing
-codes are created with the default name and description. If a default name already
-belongs to another code and the expected code is absent, the command raises a
-clear CommandError and rolls back its changes for manual reconciliation. Existing
+names, descriptions, IDs and relationships when a department was renamed. If the
+code is absent, an existing default name is reused with its current code. A new
+department is created only when neither code nor name exists. If code and name
+match separate records, both records are preserved without merging. Existing
 CEO/CTO permission removals remain preserved. Regression coverage lives in
 `accounts/test_default_account_data.py` and `accounts/test_executive_permissions.py`.
 

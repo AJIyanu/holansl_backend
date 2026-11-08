@@ -1,7 +1,6 @@
 from io import StringIO
 
 from django.core.management import call_command
-from django.core.management.base import CommandError
 from django.test import TestCase
 
 from accounts.management.commands.create_default_account_data import DEPARTMENTS
@@ -37,17 +36,34 @@ class DefaultAccountDataTests(TestCase):
             self.assertEqual(department.name, item["name"])
             self.assertEqual(department.description, item["description"])
 
-    def test_name_conflict_reports_error_and_rolls_back(self):
-        existing = Department.objects.create(name="Account", code="FIN")
+    def test_existing_names_with_legacy_codes_are_preserved_on_repeat_runs(self):
+        existing = [
+            Department.objects.create(
+                name=item["name"], code=f"OLD{i}", description="Existing description"
+            )
+            for i, item in enumerate(DEPARTMENTS)
+        ]
 
-        with self.assertRaisesMessage(
-            CommandError, "that name already uses another code"
-        ):
-            self.seed()
+        self.seed()
+        self.seed()
 
-        self.assertEqual(
-            list(Department.objects.values_list("pk", flat=True)), [existing.pk]
-        )
-        existing.refresh_from_db()
-        self.assertEqual(existing.code, "FIN")
-        self.assertFalse(Role.objects.exists())
+        self.assertEqual(Department.objects.count(), len(existing))
+        for i, department in enumerate(existing):
+            department.refresh_from_db()
+            self.assertEqual(department.name, DEPARTMENTS[i]["name"])
+            self.assertEqual(department.code, f"OLD{i}")
+            self.assertEqual(department.description, "Existing description")
+        self.assertTrue(Role.objects.filter(name="Viewer").exists())
+
+    def test_code_and_name_on_separate_records_are_preserved(self):
+        by_code = Department.objects.create(name="Accounting", code="ACC")
+        by_name = Department.objects.create(name="Account", code="FIN")
+
+        self.seed()
+        self.seed()
+
+        by_code.refresh_from_db()
+        by_name.refresh_from_db()
+        self.assertEqual((by_code.name, by_code.code), ("Accounting", "ACC"))
+        self.assertEqual((by_name.name, by_name.code), ("Account", "FIN"))
+        self.assertEqual(Department.objects.count(), len(DEPARTMENTS) + 1)

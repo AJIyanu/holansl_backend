@@ -1,5 +1,5 @@
 from django.contrib.auth.models import Permission
-from django.core.management.base import BaseCommand, CommandError
+from django.core.management.base import BaseCommand
 from django.db import transaction
 
 from accounts.models import Department, Role
@@ -154,18 +154,12 @@ class Command(BaseCommand):
                 self.stdout.write(f"Department already exists: {department.name}")
                 continue
 
-            if Department.objects.filter(name=department_data["name"]).exists():
-                raise CommandError(
-                    f"Cannot seed department {department_data['name']!r} with code "
-                    f"{department_data['code']!r}: that name already uses another "
-                    "code. Reconcile the existing department before rerunning; "
-                    "no department records have been changed."
-                )
-
+            # Older installations may use a different code for the default name.
+            # Reuse that record rather than changing identifiers or duplicating it.
             department, created = Department.objects.get_or_create(
-                code=department_data["code"],
+                name=department_data["name"],
                 defaults={
-                    "name": department_data["name"],
+                    "code": department_data["code"],
                     "description": department_data["description"],
                 },
             )
