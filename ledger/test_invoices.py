@@ -144,7 +144,7 @@ class InvoiceTests(TestCase):
         with self.assertRaises(DatabaseError), transaction.atomic():
             InvoiceRevision.objects.filter(pk=old.pk).update(snapshot={})
 
-    def test_delivery_posts_goods_once_without_vat_cash_or_earned_revenue(self):
+    def test_delivery_posts_goods_and_vat_once_without_cash_or_earned_revenue(self):
         invoice = self.create()
         self.action(invoice, "confirm")
         payload = {
@@ -164,7 +164,11 @@ class InvoiceTests(TestCase):
         self.assertEqual(
             first.posted_transaction.journal.credit_account, "DEFERRED_REVENUE"
         )
-        self.assertEqual(CashBookJournal.objects.count(), 1)
+        self.assertEqual(CashBookJournal.objects.count(), 2)
+        self.assertEqual(
+            CashBookJournal.objects.get(credit_account="VAT_PAYABLE").amount,
+            Decimal("7500"),
+        )
         self.assertFalse(CashBookEntry.objects.exists())
         self.assertEqual(
             first.confirmed_revision.snapshot["delivery_status"], "Delivered"

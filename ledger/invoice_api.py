@@ -43,6 +43,7 @@ class InvoiceSerializer(serializers.ModelSerializer):
     class Meta:
         model = SalesInvoice
         fields = [
+            "tax_rate",
             "id",
             "party",
             "date",

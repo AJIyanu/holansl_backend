@@ -1,6 +1,7 @@
 """Cash book and its append-only, two-legged journal."""
 
 import uuid
+from decimal import Decimal
 
 from django.conf import settings
 from django.db import models
@@ -71,6 +72,13 @@ class CashBookJournal(models.Model):
         on_delete=models.PROTECT,
         related_name="journal",
     )
+    staff_entry = models.ForeignKey(
+        "StaffLedgerEntry",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="journal",
+    )
     party_transaction = models.OneToOneField(
         "PartyLedgerTransaction",
         null=True,
@@ -117,6 +125,13 @@ class CashBookJournal(models.Model):
                         "ADJUSTMENT",
                         "VAT_PAYABLE",
                         "WHT_RECEIVABLE",
+                        "INPUT_TAX",
+                        "WHT_PAYABLE",
+                        "STAFF_RECEIVABLE",
+                        "STAFF_PAYABLE",
+                        "INPUT_PENDING",
+                        "CIT_PAYABLE",
+                        "TAX_EXPENSE",
                     ],
                     credit_account__in=[
                         "CASH",
@@ -130,6 +145,13 @@ class CashBookJournal(models.Model):
                         "ADJUSTMENT",
                         "VAT_PAYABLE",
                         "WHT_RECEIVABLE",
+                        "INPUT_TAX",
+                        "WHT_PAYABLE",
+                        "STAFF_RECEIVABLE",
+                        "STAFF_PAYABLE",
+                        "INPUT_PENDING",
+                        "CIT_PAYABLE",
+                        "TAX_EXPENSE",
                     ],
                 ),
                 name="cashjournal_valid_accounts",
@@ -530,6 +552,9 @@ class SalesInvoice(models.Model):
     party = models.ForeignKey("crm.Party", on_delete=models.PROTECT)
     date = models.DateField()
     currency = models.CharField(max_length=3, choices=CURRENCIES, default="NGN")
+    tax_rate = models.DecimalField(
+        max_digits=5, decimal_places=2, default=Decimal("7.5")
+    )
     reference = models.CharField(max_length=40, unique=True, null=True, blank=True)
     billed_to = models.CharField(max_length=255)
     billing_address = models.TextField(blank=True, max_length=1000)
@@ -751,3 +776,500 @@ class ReceiptEmail(models.Model):
     class Meta:
         default_permissions = ()
         ordering = ["-created_at", "-id"]
+
+
+class PurchaseBill(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    party = models.ForeignKey("crm.Party", on_delete=models.PROTECT)
+    reference = models.CharField(max_length=100)
+    date = models.DateField(db_index=True)
+    currency = models.CharField(max_length=3, choices=CURRENCIES)
+    subtotal = models.DecimalField(max_digits=18, decimal_places=2)
+    snapshot = models.JSONField()
+    version = models.PositiveIntegerField(default=1)
+    delivered_at = models.DateField(null=True, blank=True)
+    transaction = models.OneToOneField(
+        PartyLedgerTransaction,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="bill_document",
+    )
+    supplier_purchase = models.OneToOneField(
+        "procurement.SupplierPurchase", null=True, blank=True, on_delete=models.PROTECT
+    )
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        default_permissions = ("view", "add", "change")
+        permissions = [("deliver_purchasebill", "Can mark supplier bills delivered")]
+        ordering = ["-date", "-created_at", "-id"]
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(subtotal__gt=0), name="purchase_bill_positive"
+            )
+        ]
+
+
+class PurchaseBillEvent(models.Model):
+    request_key = models.UUIDField(primary_key=True)
+    bill = models.ForeignKey(
+        PurchaseBill, on_delete=models.PROTECT, related_name="events"
+    )
+    action = models.CharField(max_length=10)
+    payload = models.JSONField()
+    snapshot = models.JSONField()
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        default_permissions = ()
+        ordering = ["-created_at", "-request_key"]
+
+
+class PurchasePayment(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    request_key = models.UUIDField(unique=True)
+    party = models.ForeignKey("crm.Party", on_delete=models.PROTECT)
+    bill = models.ForeignKey(
+        PurchaseBill, null=True, blank=True, on_delete=models.PROTECT
+    )
+    transaction = models.OneToOneField(
+        PartyLedgerTransaction,
+        on_delete=models.PROTECT,
+        related_name="purchase_payment",
+    )
+    date = models.DateField(db_index=True)
+    currency = models.CharField(max_length=3, choices=CURRENCIES)
+    subtotal = models.DecimalField(max_digits=18, decimal_places=2)
+    vat = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    withholding = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    paid = models.DecimalField(max_digits=18, decimal_places=2)
+    snapshot = models.JSONField()
+    submission = models.JSONField()
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        default_permissions = ("view", "add", "change")
+        permissions = [
+            ("download_purchasepayment", "Can download supplier receipt evidence")
+        ]
+        ordering = ["-date", "-created_at", "-id"]
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(subtotal__gt=0, vat__gte=0, withholding__gte=0, paid__gt=0),
+                name="purchase_payment_positive",
+            ),
+            models.CheckConstraint(
+                condition=Q(paid=F("subtotal") + F("vat") - F("withholding")),
+                name="purchase_payment_balanced",
+            ),
+        ]
+
+
+class PurchaseReceiptEvidence(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    request_key = models.UUIDField(unique=True)
+    payment = models.ForeignKey(
+        PurchasePayment, on_delete=models.PROTECT, related_name="evidence"
+    )
+    version = models.PositiveIntegerField()
+    receipt_number = models.CharField(max_length=100, blank=True)
+    filename = models.CharField(max_length=255, blank=True)
+    mime_type = models.CharField(max_length=100, blank=True)
+    size_bytes = models.PositiveIntegerField(default=0)
+    checksum = models.CharField(max_length=64, blank=True)
+    storage_provider = models.CharField(max_length=30, blank=True)
+    external_file_id = models.TextField(blank=True)
+    storage_path = models.TextField(blank=True)
+    payload = models.JSONField()
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        default_permissions = ()
+        ordering = ["-version"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["payment", "version"], name="purchase_evidence_version"
+            )
+        ]
+
+
+class StaffLedgerSelection(models.Model):
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="staff_ledger_selection",
+    )
+    staff = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="ledger_selected_by",
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        default_permissions = ()
+
+
+class StaffLedgerEntry(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    request_key = models.UUIDField(unique=True)
+    staff = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="staff_ledger_entries",
+    )
+    kind = models.CharField(
+        max_length=10,
+        choices=[
+            ("PAY", "Pay staff"),
+            ("RECEIVE", "Receive from staff"),
+            ("RETIRE", "Retire advance"),
+        ],
+    )
+    category = models.CharField(max_length=30)
+    date = models.DateField(db_index=True)
+    currency = models.CharField(max_length=3, choices=CURRENCIES)
+    amount = models.DecimalField(max_digits=18, decimal_places=2)
+    description = models.CharField(max_length=1000)
+    reference = models.CharField(max_length=100, blank=True)
+    related_entry = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="settlements",
+    )
+    cash_entry = models.OneToOneField(
+        CashBookEntry,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="staff_transaction",
+    )
+    receivable_delta = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    payable_delta = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    payload = models.JSONField()
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="staff_entries_recorded",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        default_permissions = ()
+        permissions = [
+            ("view_staffledger", "Can view staff ledger"),
+            ("pay_staffledger", "Can pay staff"),
+            ("receive_staffledger", "Can receive money from staff"),
+            ("retire_staffledger", "Can submit itemized advance retirements"),
+            ("approve_staffledger", "Can approve or reject advance retirements"),
+            ("download_staffledger", "Can download staff ledger supporting documents"),
+            ("print_staffledger", "Can generate staff reconciliation and statement"),
+        ]
+        ordering = ["date", "created_at", "id"]
+        indexes = [
+            models.Index(
+                fields=["staff", "currency", "date"], name="staff_ledger_period_idx"
+            )
+        ]
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(amount__gt=0), name="staff_ledger_positive"
+            ),
+            models.CheckConstraint(
+                condition=Q(kind="RETIRE", cash_entry__isnull=True)
+                | Q(kind__in=["PAY", "RECEIVE"], cash_entry__isnull=False),
+                name="staff_ledger_cash_link",
+            ),
+        ]
+
+
+class StaffRetirement(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    request_key = models.UUIDField(unique=True)
+    advance = models.ForeignKey(
+        StaffLedgerEntry, on_delete=models.PROTECT, related_name="retirements"
+    )
+    date = models.DateField()
+    description = models.CharField(max_length=1000)
+    total = models.DecimalField(max_digits=18, decimal_places=2)
+    items = models.JSONField()
+    payload = models.JSONField()
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        default_permissions = ()
+        ordering = ["-created_at", "-id"]
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(total__gt=0), name="staff_retirement_positive"
+            )
+        ]
+
+
+class StaffRetirementDecision(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    request_key = models.UUIDField(unique=True)
+    retirement = models.OneToOneField(
+        StaffRetirement, on_delete=models.PROTECT, related_name="decision"
+    )
+    advance = models.ForeignKey(
+        StaffLedgerEntry, on_delete=models.PROTECT, related_name="retirement_decisions"
+    )
+    approved = models.BooleanField()
+    date = models.DateField()
+    reason = models.CharField(max_length=1000)
+    entry = models.OneToOneField(
+        StaffLedgerEntry,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="retirement_decision",
+    )
+    payload = models.JSONField()
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        default_permissions = ()
+        constraints = [
+            models.UniqueConstraint(
+                fields=["advance"],
+                condition=Q(approved=True),
+                name="staff_single_retirement_approval",
+            ),
+            models.CheckConstraint(
+                condition=Q(approved=True, entry__isnull=False)
+                | Q(approved=False, entry__isnull=True),
+                name="staff_decision_posting",
+            ),
+        ]
+
+
+class StaffLedgerDocument(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    entry = models.ForeignKey(
+        StaffLedgerEntry,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="documents",
+    )
+    retirement = models.ForeignKey(
+        StaffRetirement,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="documents",
+    )
+    item_position = models.PositiveIntegerField(null=True, blank=True)
+    filename = models.CharField(max_length=255)
+    mime_type = models.CharField(max_length=100)
+    size_bytes = models.PositiveIntegerField()
+    checksum = models.CharField(max_length=64)
+    storage_provider = models.CharField(max_length=30)
+    external_file_id = models.TextField()
+    storage_path = models.TextField(blank=True)
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        default_permissions = ()
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(
+                    entry__isnull=False,
+                    retirement__isnull=True,
+                    item_position__isnull=True,
+                )
+                | Q(
+                    entry__isnull=True,
+                    retirement__isnull=False,
+                    item_position__isnull=False,
+                    item_position__gt=0,
+                ),
+                name="staff_document_owner",
+            )
+        ]
+
+
+class StaffStatement(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    request_key = models.UUIDField(unique=True)
+    staff = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="ledger_statements",
+    )
+    date_from = models.DateField()
+    date_to = models.DateField()
+    currency = models.CharField(max_length=3, choices=CURRENCIES)
+    snapshot = models.JSONField()
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="staff_statements_created",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        default_permissions = ()
+        ordering = ["-created_at", "-id"]
+
+
+class TaxEntry(models.Model):
+    """Immutable tax subledger movements; existing journal amounts are never reposted."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    source_key = models.CharField(max_length=160, unique=True)
+    document_key = models.CharField(max_length=100, blank=True, db_index=True)
+    kind = models.CharField(max_length=30)
+    side = models.CharField(max_length=10, blank=True)
+    date = models.DateField(db_index=True)
+    period = models.CharField(max_length=7, db_index=True)
+    currency = models.CharField(max_length=3, choices=CURRENCIES)
+    party = models.ForeignKey(
+        "crm.Party", null=True, blank=True, on_delete=models.PROTECT
+    )
+    transaction = models.ForeignKey(
+        PartyLedgerTransaction,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="tax_entries",
+    )
+    cash_entry = models.ForeignKey(
+        CashBookEntry,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="tax_entries",
+    )
+    reference = models.CharField(max_length=100, blank=True)
+    description = models.CharField(max_length=1000)
+    output_vat = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    input_vat = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    input_pending = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    input_nonrecoverable = models.DecimalField(
+        max_digits=18, decimal_places=2, default=0
+    )
+    sales_vat_cash = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    purchase_vat_cash = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    wht_asset = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    wht_liability = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    input_used = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    vat_remitted = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    wht_remitted = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    cit_assessed = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    cit_paid = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    wht_used = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    party_vat = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    delivery_vat = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    metadata = models.JSONField(default=dict)
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        default_permissions = ()
+        ordering = ["date", "created_at", "id"]
+        indexes = [
+            models.Index(fields=["currency", "date"], name="tax_currency_date_idx")
+        ]
+        permissions = [
+            (f"{action}_taxledger", label)
+            for action, label in [
+                ("view", "Can view tax ledger"),
+                ("remit", "Can prepare tax remittances"),
+                ("approve", "Can approve tax operations"),
+                ("adjust", "Can prepare tax adjustments and CIT assessments"),
+                (
+                    "configure",
+                    "Can configure tax policies and input VAT classification",
+                ),
+                ("apply", "Can apply WHT credits to CIT"),
+                ("export", "Can export tax ledger"),
+            ]
+        ]
+
+
+class TaxRequest(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    request_key = models.UUIDField(unique=True)
+    payload = models.JSONField()
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        default_permissions = ()
+        ordering = ["-created_at", "-id"]
+
+
+class TaxDecision(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    request_key = models.UUIDField(unique=True)
+    request = models.OneToOneField(
+        TaxRequest, on_delete=models.PROTECT, related_name="decision"
+    )
+    approved = models.BooleanField()
+    reason = models.CharField(max_length=1000)
+    payload = models.JSONField()
+    entry = models.OneToOneField(
+        TaxEntry, null=True, blank=True, on_delete=models.PROTECT
+    )
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        default_permissions = ()
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(approved=True, entry__isnull=False)
+                | Q(approved=False, entry__isnull=True),
+                name="tax_decision_posting",
+            )
+        ]
+
+
+class TaxDocument(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    request = models.OneToOneField(
+        TaxRequest, on_delete=models.PROTECT, related_name="document"
+    )
+    filename = models.CharField(max_length=255)
+    mime_type = models.CharField(max_length=100)
+    size_bytes = models.PositiveIntegerField()
+    checksum = models.CharField(max_length=64)
+    storage_provider = models.CharField(max_length=30)
+    external_file_id = models.TextField()
+    storage_path = models.TextField(blank=True)
+
+    class Meta:
+        default_permissions = ()
+
+
+class TaxPolicy(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    request_key = models.UUIDField(unique=True)
+    party = models.ForeignKey(
+        "crm.Party", null=True, blank=True, on_delete=models.PROTECT
+    )
+    kind = models.CharField(max_length=10, choices=[("VAT", "VAT"), ("WHT", "WHT")])
+    rate = models.DecimalField(max_digits=5, decimal_places=2)
+    effective_date = models.DateField()
+    enabled = models.BooleanField(default=True)
+    reason = models.CharField(max_length=1000)
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        default_permissions = ()
+        ordering = ["-effective_date", "-created_at", "-id"]

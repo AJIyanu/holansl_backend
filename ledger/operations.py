@@ -165,7 +165,21 @@ def operate(*, actor, party_id, kind, payload):
     if action == "ALLOCATE":
         if source.transaction_type != "PAYMENT":
             raise ValidationError("Only a payment can be allocated.")
+        from .models import TaxEntry
+
+        tax_source = TaxEntry.objects.filter(transaction=source, kind="PAYMENT").first()
         items = d["allocations"]
+        if tax_source and (tax_source.sales_vat_cash or tax_source.purchase_vat_cash):
+            target_keys = set(
+                TaxEntry.objects.filter(
+                    transaction_id__in=[i["document_id"] for i in items],
+                    kind__in=["DELIVERY", "OPENING"],
+                ).values_list("document_key", flat=True)
+            )
+            if items and (target_keys != {tax_source.document_key} or len(items) != 1):
+                raise ValidationError(
+                    "VAT-bearing payments must remain linked to their original invoice or bill. Reverse and reissue with the correct document to change tax ownership."
+                )
         if len({i["document_id"] for i in items}) != len(items):
             raise ValidationError("Select each document only once.")
         release(source, actor, d["date"], d["reason"])
@@ -303,7 +317,10 @@ def operate(*, actor, party_id, kind, payload):
         cash = None
         receipt_correction = (
             source
-            and hasattr(source, "receipt_document")
+            and (
+                hasattr(source, "receipt_document")
+                or hasattr(source, "purchase_payment")
+            )
             and action in ("REFUND", "REVERSE")
         )
         refund_vat, refund_wht = Decimal("0"), Decimal("0")
@@ -383,6 +400,11 @@ def operate(*, actor, party_id, kind, payload):
                 d["reason"],
                 reverse=True,
             )
+        from .tax_posting import correction_tax
+
+        correction_tax(
+            record, source, action, refund_vat, refund_wht
+        ) if source else None
         result = {"id": str(record.pk), "message": "Correction posted."}
     LedgerOperation.objects.create(
         request_key=d["request_key"],

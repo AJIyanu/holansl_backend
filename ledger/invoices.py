@@ -69,7 +69,7 @@ def invoice_pricing(invoice):
     with localcontext() as ctx:
         ctx.prec = 40
         gross_total = sum(gross, Decimal("0"))
-        vat = (invoice.subtotal * Decimal(".075")).quantize(
+        vat = (invoice.subtotal * invoice.tax_rate / 100).quantize(
             Decimal(".01"), rounding=ROUND_HALF_UP
         )
         return {
@@ -98,6 +98,9 @@ class ItemInput(serializers.Serializer):
 
 
 class InvoiceInput(serializers.Serializer):
+    expected_vat_rate = serializers.DecimalField(
+        max_digits=5, decimal_places=2, required=False
+    )
     request_key = serializers.UUIDField()
     version = serializers.IntegerField(min_value=1, required=False)
     date = serializers.DateField()
@@ -213,6 +216,7 @@ def save_invoice(*, actor, party_id, payload, invoice_id=None, source=None):
     )
     if previous:
         return previous
+    expected_rate = d.pop("expected_vat_rate", None)
     items = d.pop("items")
     discount_percent = d.pop("discount_percent")
     version = d.pop("version", None)
@@ -248,9 +252,29 @@ def save_invoice(*, actor, party_id, payload, invoice_id=None, source=None):
             raise ValidationError("Choose an active client.")
         if any(item.get("id") for item in items):
             raise ValidationError("New invoices cannot reuse item identifiers.")
-        invoice = SalesInvoice(party=party, created_by=actor, **d)
+        from .tax_posting import policy_rate
+
+        invoice = SalesInvoice(
+            party=party, created_by=actor, tax_rate=policy_rate("VAT", d["date"]), **d
+        )
     _, amounts = item_amounts(items, discount_percent)
-    invoice.subtotal = sum(amounts, Decimal("0"))
+    if expected_rate is not None and expected_rate != invoice.tax_rate:
+        raise ValidationError(
+            "VAT policy changed. Reload the form and review the current rate."
+        )
+    subtotal = sum(amounts, Decimal("0"))
+    if invoice_id:
+        from .tax_posting import validate_document_edit, rounded
+
+        original_invoice = SalesInvoice.objects.get(pk=invoice_id)
+        validate_document_edit(
+            original_invoice,
+            "sales",
+            subtotal,
+            rounded(subtotal * invoice.tax_rate / 100),
+            invoice.currency,
+        )
+    invoice.subtotal = subtotal
     invoice.updated_by = actor
     invoice.save()
     if not invoice.finance_request_id:
@@ -328,6 +352,7 @@ def document_snapshot(invoice):
         "notes": invoice.notes,
         "company": dict(settings.PROCUREMENT_DOCUMENT_COMPANY),
         "version": invoice.version,
+        "vat_rate": str(invoice.tax_rate),
         "delivery_status": "Delivered" if invoice.delivered_at else "Not delivered",
         "delivery_date": str(invoice.delivered_at) if invoice.delivered_at else None,
         "items": [
@@ -349,7 +374,6 @@ def document_snapshot(invoice):
             for r in invoice.items.all()
         ],
         "subtotal": str(invoice.subtotal),
-        "vat_rate": "7.5",
     }
 
 
@@ -416,6 +440,9 @@ def invoice_action(*, actor, invoice_id, action, payload):
         )
         invoice.posted_transaction = posted
         invoice.delivered_at = delivered
+        from .tax_posting import delivery_tax
+
+        delivery_tax(invoice, "sales")
         invoice.version += 1
         if invoice.finance_request_id:
             from .models import ProcurementLedgerLink, ProcurementInvoiceLine

@@ -2,13 +2,23 @@ from datetime import date
 from zoneinfo import ZoneInfo
 from decimal import Decimal
 
-from django.db.models import Case, When, F, Q, Sum, Window, DecimalField
+from django.db.models import (
+    Case,
+    When,
+    F,
+    Q,
+    Sum,
+    Window,
+    DecimalField,
+    Exists,
+    OuterRef,
+)
 from django.utils import timezone
 from rest_framework import serializers, status, viewsets
 from rest_framework.permissions import BasePermission
 from rest_framework.response import Response
 
-from .models import CashBookEntry, CashBookJournal
+from .models import CashBookEntry, CashBookJournal, TaxEntry
 from .serializers import (
     CashBookSerializer,
     CashBookWriteSerializer,
@@ -91,8 +101,8 @@ def signed_amount():
 
 class CashBookViewSet(viewsets.ModelViewSet):
     queryset = CashBookEntry.objects.select_related(
-        "created_by", "updated_by", "party_transaction"
-    )
+        "created_by", "updated_by", "party_transaction", "staff_transaction"
+    ).annotate(has_tax=Exists(TaxEntry.objects.filter(cash_entry_id=OuterRef("pk"))))
     serializer_class = CashBookSerializer
     permission_classes = [CashBookPermission]
     http_method_names = ["get", "post", "patch", "delete", "head", "options"]

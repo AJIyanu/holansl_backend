@@ -1,5 +1,102 @@
 # Ledger — cash book, party ledgers and reconciliation
 
+## Itemized supplier bills and payments — 2026-11-08
+
+This section supersedes earlier immediate bill posting and basic Add payment UI.
+Purchase Ledger now has supplier invoice documents and itemized payment records.
+Both reuse the CRM supplier UUID; there is no per-supplier database table.
+
+### Bill and payment rules
+
+- Bills capture supplier invoice reference/date/currency, description and ordered
+  items (description, quantity, unit and unit price). Tax switch defaults off with
+  an adjustable 7.5% rate. Discount switch accepts a fixed amount or percentage.
+  Lines round half-up; document discount is applied before tax and apportioned
+  across line values using cumulative rounding to preserve the exact total.
+- Undelivered bills are outside supplier debt and can be edited with version checks.
+  Delivered-on-create or Mark delivered posts the net goods subtotal once as
+  purchase clearing debit / supplier payable credit. No cash moves on delivery.
+  Delivered bills are immutable. Every bill change/delivery retains actor and snapshot.
+- Payment items can be entered manually or copied from a same-supplier invoice into
+  an independently editable draft. Confirmation requires a matching active cash/bank
+  account and currency. Noncash methods require the paying bank name. Only payments
+  already made can be confirmed; future bill/payment/delivery dates are rejected.
+- Payment tax switch/rate and discount are editable before confirmation. Withholding
+  defaults to 2% when enabled and is adjustable below 100%. Both tax and withholding
+  use the goods value after discount, before tax. Cash out = goods + tax − withholding.
+  The purchase ledger/allocations remain goods-only. Tax is recorded in the general
+  journal and Tax Ledger. Migration0028 adds payment-or-delivery recognition,
+  remittances and tax-aware reconciliation; statutory filing remains outside scope.
+- Example: goods 100,000, tax 7,500, withholding 2,000 gives debit supplier payable/
+  advance 100,000 and input tax 7,500; credit cash/bank 105,500 and withholding tax
+  payable 2,000. The paired journal stores payable/cash 98,000, payable/WHT payable
+  2,000 and input tax/cash 7,500 under the payment cash entry.
+- Payments before delivery remain supplier advances. When their linked bill is
+  delivered, available advances are applied automatically without another cash entry.
+  Allocation dates respect both source dates and existing settlement/correction dates.
+  Payments after delivery allocate up to the bill's outstanding goods amount.
+  Linked payments cannot exceed the remaining document value; unrelated advances
+  are recorded separately. Reversals and refunds preserve actual cash and tax legs.
+- Confirmation is atomic across financial rows, evidence metadata and allocations;
+  UUID/canonical-payload retry checks prevent duplicate payments or deliveries.
+  Supplier receipt number is external evidence, distinct from the immutable internal
+  posting reference. Existing historical financial records are not rewritten.
+
+### Supplier receipt evidence
+
+The optional supplier receipt scan may be uploaded on payment confirmation or later.
+Supported types: validated PDF (up to 100 pages), JPEG, PNG and WebP; maximum 10 MB
+and 25 million image pixels. Filenames are sanitized; content is parsed/verified,
+not accepted solely on the claimed MIME. Checksums are retained for retry protection.
+
+After confirmation, PATCH permits only the supplier receipt number and scan, with
+version/UUID checks. It appends an immutable evidence revision; prior scans/numbers
+remain available to authorized staff. Omitting a new file keeps the current scan.
+Payment items, totals, rates, date, currency and account cannot be edited or deleted.
+
+New files use the existing configured private document-storage service (Supabase by
+default). Downloads route by the recorded provider and never expose storage paths,
+credentials or public URLs. Downloads require explicit permission and use attachment,
+private/no-store and nosniff headers. No supplier-facing documents or emails are
+created. Upload failures roll back financial/evidence writes; failed DB commits
+attempt remote-upload compensation and safely log compensation failures for review.
+
+### API and permissions
+
+- GET/POST `/ledger/purchase-bills/parties/{UUID}/`: paginated bills / create.
+- GET/PATCH `/ledger/purchase-bills/{UUID}/`: detail/history / edit undelivered bill.
+- POST `/ledger/purchase-bills/{UUID}/deliver/`: version, request_key, delivery_date.
+- GET/POST `/ledger/purchase-payments/parties/{UUID}/`: history / confirm payment.
+- GET/PATCH `/ledger/purchase-payments/{UUID}/`: detail / receipt evidence only.
+- GET `/ledger/purchase-payments/{UUID}/evidence/{UUID}/download/`: private scan.
+
+Bill create/edit uses items, reference, date, currency, tax_enabled/tax_percent,
+discount_enabled/discount_type/discount_value, delivered and optional delivery_date.
+Payment also uses account_id, payment_method, bank_name, receipt_number, optional
+bill_id/bill_version, withholding_enabled/withholding_percent. Confirmation accepts
+JSON or multipart with JSON `payload` plus optional `file`. Evidence PATCH uses
+multipart/JSON payload {request_key, version, receipt_number} plus optional file.
+History supports search and pagination; bills additionally filter delivery status.
+
+Staff require view_purchaseledger and view_purchasebill/view_purchasepayment plus
+the matching add/change permission. Delivery requires deliver_purchasebill and
+add_purchasetransaction; payment creation additionally requires add_purchasetransaction
+and add_cashbookentry. File access requires download_purchasepayment. Frontend uses
+existing formatted permissions (ledger.purchasebill.create/edit/deliver and
+ledger.purchasepayment.create/edit/download). New permissions follow the existing
+additive executive hooks; other staff must receive explicit grants.
+
+Legacy raw BILL POST is rejected so it cannot bypass delivery. Procurement bill
+imports now create undelivered bill documents, retain their source and disappear
+from the import inbox. Existing already-posted source imports remain unchanged.
+Procurement source-item details remain fixed; delivery links the resulting posting.
+
+Migration **0026_purchasebill_purchasebillevent_purchasepayment_and_more** adds
+bills/events, immutable payments and evidence revisions, constraints/triggers and
+Input Tax / WHT Payable journal account codes. No application migration was run.
+No dependencies were added. Generated migrations were tested only on disposable
+local PostgreSQL databases; storage providers were mocked, with no live uploads.
+
 ## Payment receipts — 2026-11-08
 
 The approved receipt workflow replaces Sales Ledger's Add payment button with
@@ -528,3 +625,203 @@ Downloads and emailed attachments use confirmed snapshots. Delivery posts only
 net goods amounts to the existing sales/journal flow; procurement-linked item
 identities, quantities and source prices remain protected while net values flow
 into ProcurementInvoiceLine and acceptance/recognition. No cash movement is added.
+
+## Staff Ledger
+
+Staff Ledger uses existing UUID user accounts (staff users, users with a staff
+profile, and historical ledger staff). It does not create CRM parties or tables
+per staff member. The last selected staff member is saved per operator. Inactive
+staff remain available for settling historical balances. Only active staff actors
+with assigned permissions, or Django superusers, can access the ledger.
+
+Financial year defaults to January–December; opening balance is zero until money
+is recorded. NGN, USD and GBP are separate balances and accounts. No conversion,
+payroll tax, salary accrual or payroll run is introduced.
+
+### Actions and posting
+
+- **Pay Staff** records date, category, description, positive amount, currency,
+  active cash/bank account, optional reference and optional supporting document.
+  Salaries, allowances, transportation and ordinary staff expenses debit EXPENSE
+  and credit CASH. They never create staff debt. Loans and advances debit
+  STAFF_RECEIVABLE and credit CASH.
+- **Receive from Staff** records the same money details. Linked loan repayments
+  or advance/change returns debit CASH and credit STAFF_RECEIVABLE. Staff levies,
+  contributions and other income debit CASH and credit INCOME.
+- **Retire Advance** submits an ordered expense list linked to one staff advance:
+  date, description, and 1–100 items containing expense date, category, description,
+  positive amount and optional supporting receipt. The order is preserved as
+  one-based `position`. Submission does not post money or expenses. One pending
+  or approved submission is permitted per advance. A rejected submission remains
+  in history; a corrected breakdown can be submitted as a new record.
+- **Approve/reject retirement** requires its own permission and a dated reason.
+  The supplied `expected_remaining` protects against approval based on an outdated
+  advance balance. Approval debits EXPENSE per ordered item and credits the remaining
+  STAFF_RECEIVABLE; any excess credits STAFF_PAYABLE. It creates no cash entry.
+  Self-approval is permitted; preparer, approver, reason and timestamps remain recorded.
+- **Advance reimbursement** is a linked Pay Staff category: debit STAFF_PAYABLE,
+  credit CASH. Payments cannot exceed the approved reimbursement due. Repayments
+  and returns cannot exceed the linked recoverable balance. Linked records must
+  belong to the same staff member/currency and cannot precede their source or any
+  existing financial settlements.
+
+Example: pay an advance of NGN100,000, approve expenses of NGN75,000, then receive
+NGN25,000 change. There are two cash movements and one noncash expense posting.
+For NGN120,000 expenses against NGN100,000 remaining, NGN20,000 becomes reimbursement
+due to staff. Any return made before approval reduces the available advance first.
+Loans, unretired advances, change due and reimbursements are reported separately;
+salaries and allowances are shown as payments without being treated as debt.
+
+### Staff API
+
+All paths start `/ledger/staff-ledger/`. Lists use standard DRF pagination.
+
+| Path | Methods | Purpose |
+| --- | --- | --- |
+| `/` | GET, PUT | Read/save last selection; PUT `{staff_id}` |
+| `staff/` | GET | Search names/usernames with `search`, `page`; minimal identity only |
+| `staff/{uuid}/entries/` | GET, POST | Filter transactions by `date_from`, `date_to`, `currency`, `page`; post cash movement |
+| `entries/{uuid}/` | GET | Posted record, actor, linked advance and safe document metadata |
+| `staff/{uuid}/choices/` | GET | All-year source lookup: `mode=advance|loan|reimbursement|retire`, `currency`, `search`, `page`; current balances |
+| `staff/{uuid}/retirements/` | GET, POST | All-date/all-currency submission history; submit expense breakdown |
+| `retirements/{uuid}/` | GET | Ordered expenses, evidence, preparer, decision and current remaining advance |
+| `retirements/{uuid}/decision/` | POST | Approve/reject with `{request_key, approved, date, reason, expected_remaining}` |
+| `documents/{uuid}/download/` | GET | Permission-checked private attachment download |
+| `staff/{uuid}/statements/` | GET, POST | Saved statement history / generate immutable snapshot |
+| `statements/{uuid}/` | GET | Complete printable snapshot |
+
+Money POST accepts `{request_key, kind: PAY|RECEIVE, category, date, currency,
+amount, account_id, description, reference?, related_entry?}`. Related entry is
+required for ADVANCE_RETURN, LOAN_REPAYMENT and ADVANCE_REIMBURSEMENT only.
+Retirement POST accepts `{request_key, advance_id, date, description, items}`.
+Items are `{date, category, description, amount}`; expense categories are TRANSPORT,
+ACCOMMODATION, MEALS, PURCHASES, COMMUNICATION and OTHER.
+
+For uploads, send multipart `payload` containing the JSON body. Money forms accept
+`file`; retirement forms accept `item_0`, `item_1`, etc., aligned with the final item
+order. Documents must be genuine PNG/JPEG/WebP or PDF, at most 10 MB each and 20 MB
+combined. Existing content validation limits also apply. New documents use private
+Supabase storage; downloads use their recorded provider. Storage failures roll back
+financial changes and compensate earlier successful uploads. Private storage paths
+are never returned. Staff UUIDs are opaque storage owner keys under the `staff_ledger`
+category; no artificial CRM Party is created.
+
+Statement POST accepts `{request_key, date_from, date_to, currency}`. The frozen
+**Reconciliation and Statement** includes every transaction in the range (not merely
+the displayed page), prior receivable/payable balances, money paid/received,
+approved advance expenses, running balances, closing balances and the four separate
+outstanding categories. The company identity comes from PROCUREMENT_DOCUMENT_COMPANY.
+Historical categorization uses dated financial approvals, not today's submission state.
+Pending/rejected expense submissions are excluded from financial statements.
+
+### Staff permissions, integrity and deployment
+
+All access requires `ledger.view_staffledger`. Actions additionally require
+`pay_staffledger`, `receive_staffledger`, `retire_staffledger`, `approve_staffledger`,
+`download_staffledger` or `print_staffledger`. Cash actions also require
+`ledger.add_cashbookentry`. Frontend format is `ledger.staffledger.view|pay|receive|
+retire|approve|download|print` and `ledger.cashbookentry.create`, using the existing
+permission formatter. Executive permission creation hooks remain additive; no role
+name bypass is introduced. Staff directory access reveals only UUID, name, username
+and active status, not private profile or bank data.
+
+Each financial action is atomic and idempotent using a request UUID and normalized
+payload. Staff-row locks serialize settlements; advisory locks serialize retries.
+Posted staff entries, expense submissions/decisions, evidence and statements are
+append-only with database UPDATE/DELETE guards. Staff-linked cash entries cannot
+be independently edited or voided from Cash Book. The paired journal supports
+STAFF_RECEIVABLE and STAFF_PAYABLE, maintaining equal debit/credit amounts.
+
+Migration **0027_staff_ledger** adds shared staff models, indexes/constraints,
+permissions, a journal source link, two nominal account codes and immutable guards.
+It depends on migration0026 and preserves existing data. It was generated for operator
+review; application migrations are not executed as part of feature development.
+No new dependencies. Tests cover posting, permission gates, ordered item evidence,
+rollback/cleanup, prior balances, currency separation, full statement snapshots,
+idempotency and concurrent settlement/approval.
+
+
+## Tax Ledger (migration 0028)
+
+`/ledger/tax/` returns paginated immutable movements with filtered opening/closing
+and period totals; `balances` is explicitly company-wide for the selected currency
+as at `date_to`. Filters: `date_from`, `date_to`, `currency`, optional party UUID,
+`tax_type=ALL|VAT|WHT|CIT`. VAT and WHT are never offset against one another.
+
+Posting hooks in invoice delivery, supplier delivery, sales receipts, purchase
+payments and corrections run inside their original atomic financial transaction.
+VAT is recognised at payment or delivery, whichever comes first, once per document.
+Later receipts/payments settle previously recognised VAT. Issuance alone does not
+post VAT. Input VAT defaults eligible for taxable resale; approved classification
+can move it to pending review or non-recoverable expense. WHT held by clients is an
+asset; WHT withheld from suppliers is a liability. Raw goods allocations cannot
+reassign VAT-bearing payments to a different tax source.
+
+`POST /ledger/tax/requests/` prepares an immutable request (JSON or multipart with
+JSON `payload` and optional `file`, 10 MB JPEG/PNG/WebP/PDF). Required base fields:
+UUID `request_key`, `action`, completed `date`, `period` YYYY-MM, `currency`, and
+`description`. Supported actions:
+
+- `REMIT`: `tax_type` VAT/WHT/CIT, positive `amount`, `authority`, payment `reference`
+  and active matching-currency `account_id`. Records an already-made payment;
+  creates cash and journal entries only on approval. VAT settlement also records
+  eligible input-credit offset; excess input credit carries forward.
+- `VAT_SETTLE`: delivered `document_key` (`sales:UUID` or `purchase:UUID`), account
+  and amount. Settles outstanding document VAT without a duplicate goods payment.
+- `CLASSIFY`: purchase tax `document_key`, `classification` AVAILABLE/PENDING/
+  NONRECOVERABLE. Existing used credits must be released before reclassification.
+- `CIT_ASSESS`: manual accountant-entered liability amount; no automatic tax engine.
+- `CIT_CREDIT`: applies unused client WHT to outstanding assessed CIT without cash;
+  application/remittance is capped by the assessment year selected by `period`.
+- `ADJUST`: audited positive amount and `adjust_field`, optionally `decrease=true`.
+- `OPENING`: reviewed historical delivery document, applying only missing VAT and
+  its party-control balance; existing historical payments must first be linked.
+- `REVERSE`: `source_entry` UUID for a remittance, CIT assessment/credit or manual
+  adjustment; appends inverse tax/journal/cash records using the original period.
+  An already-applied credit or settled liability cannot be invalidated silently.
+
+`GET /ledger/tax/requests/` supports `status=all|pending|approved|rejected` and
+pagination; `GET /ledger/tax/requests/{id}/` includes preparation, evidence and
+decision audit. `POST /ledger/tax/requests/{id}/decision/` accepts UUID request key,
+`approved` boolean and `reason`. Self-approval is allowed with both actors retained.
+Both approver and operation permission are required. Cash operations additionally
+require `ledger.add_cashbookentry`. Replays use the original idempotency key;
+changed payloads or competing over-settlements are rejected.
+
+Permissions use the existing formatting: `ledger.taxledger.view`, `.remit`,
+`.approve`, `.adjust`, `.configure`, `.apply`, `.export` (Django codenames
+`view_taxledger`, etc.). Migration creates permission definitions; staff grants
+remain explicit. Existing revoked executive permissions are not restored.
+
+Additional endpoints:
+
+- `GET /ledger/tax/sources/`: searchable, currency-specific paginated tax sources.
+- `GET /ledger/tax/parties/`: minimal permissioned party names/IDs for filters.
+- `GET/POST /ledger/tax/policies/`: immutable future/current effective VAT/WHT
+  policy versions, optional client-specific WHT override, rate, enabled and reason.
+  VAT defaults 7.5%; selected WHT defaults 2%. Existing rates remain frozen.
+- `GET /ledger/tax/rates/`: date/party and optional invoice for permissioned sales
+  forms. Review submits expected rates; changed rates require another review.
+- `GET /ledger/tax/documents/{id}/download/`: private recorded-provider evidence.
+- `GET /ledger/tax/export/`: permissioned CSV with filters and formula protection.
+- `GET /ledger/tax/history/`: read-only missing-link/discrepancy/delivery-gap review.
+
+New reconciliation snapshots include `tax` summaries and row-level VAT recognised,
+VAT cash, WHT, actual cash and combined balances. Original goods-only balances are
+retained for compatibility. Previously saved snapshots remain unchanged. Tax-linked
+cash entries cannot be edited/voided independently.
+
+### Rollout and historical records
+
+Review and run migrations through 0028 explicitly on the application database.
+Then preview `python manage.py backfill_tax_ledger`. After review, an operator may
+run `python manage.py backfill_tax_ledger --apply`. Apply links historical payments
+and corrections, checks immutable journals for discrepancies and is repeatable;
+it does not repost cash, alter old journals or auto-approve delivery gaps. Use
+approved OPENING requests for those gaps after historical links are complete.
+Backfill discrepancy errors roll back the entire link operation. Run during a
+maintenance window because it serialises against financial posting.
+
+No electronic invoicing, WHT certificates or live authority submission is included.
+The user-selected VAT timing is an operational policy, not a declaration of full
+statutory compliance; see [approved design](../design/TAX_LEDGER.md).

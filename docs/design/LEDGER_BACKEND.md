@@ -1,5 +1,102 @@
 # Ledger backend design
 
+## Itemized supplier bills and payments — 2026-11-08
+
+This section supersedes earlier immediate bill posting and basic Add payment UI.
+Purchase Ledger now has supplier invoice documents and itemized payment records.
+Both reuse the CRM supplier UUID; there is no per-supplier database table.
+
+### Bill and payment rules
+
+- Bills capture supplier invoice reference/date/currency, description and ordered
+  items (description, quantity, unit and unit price). Tax switch defaults off with
+  an adjustable 7.5% rate. Discount switch accepts a fixed amount or percentage.
+  Lines round half-up; document discount is applied before tax and apportioned
+  across line values using cumulative rounding to preserve the exact total.
+- Undelivered bills are outside supplier debt and can be edited with version checks.
+  Delivered-on-create or Mark delivered posts the net goods subtotal once as
+  purchase clearing debit / supplier payable credit. No cash moves on delivery.
+  Delivered bills are immutable. Every bill change/delivery retains actor and snapshot.
+- Payment items can be entered manually or copied from a same-supplier invoice into
+  an independently editable draft. Confirmation requires a matching active cash/bank
+  account and currency. Noncash methods require the paying bank name. Only payments
+  already made can be confirmed; future bill/payment/delivery dates are rejected.
+- Payment tax switch/rate and discount are editable before confirmation. Withholding
+  defaults to 2% when enabled and is adjustable below 100%. Both tax and withholding
+  use the goods value after discount, before tax. Cash out = goods + tax − withholding.
+  The purchase ledger/allocations remain goods-only. Tax is recorded in the general
+  journal and Tax Ledger. Migration0028 adds payment-or-delivery recognition,
+  remittances and tax-aware reconciliation; statutory filing remains outside scope.
+- Example: goods 100,000, tax 7,500, withholding 2,000 gives debit supplier payable/
+  advance 100,000 and input tax 7,500; credit cash/bank 105,500 and withholding tax
+  payable 2,000. The paired journal stores payable/cash 98,000, payable/WHT payable
+  2,000 and input tax/cash 7,500 under the payment cash entry.
+- Payments before delivery remain supplier advances. When their linked bill is
+  delivered, available advances are applied automatically without another cash entry.
+  Allocation dates respect both source dates and existing settlement/correction dates.
+  Payments after delivery allocate up to the bill's outstanding goods amount.
+  Linked payments cannot exceed the remaining document value; unrelated advances
+  are recorded separately. Reversals and refunds preserve actual cash and tax legs.
+- Confirmation is atomic across financial rows, evidence metadata and allocations;
+  UUID/canonical-payload retry checks prevent duplicate payments or deliveries.
+  Supplier receipt number is external evidence, distinct from the immutable internal
+  posting reference. Existing historical financial records are not rewritten.
+
+### Supplier receipt evidence
+
+The optional supplier receipt scan may be uploaded on payment confirmation or later.
+Supported types: validated PDF (up to 100 pages), JPEG, PNG and WebP; maximum 10 MB
+and 25 million image pixels. Filenames are sanitized; content is parsed/verified,
+not accepted solely on the claimed MIME. Checksums are retained for retry protection.
+
+After confirmation, PATCH permits only the supplier receipt number and scan, with
+version/UUID checks. It appends an immutable evidence revision; prior scans/numbers
+remain available to authorized staff. Omitting a new file keeps the current scan.
+Payment items, totals, rates, date, currency and account cannot be edited or deleted.
+
+New files use the existing configured private document-storage service (Supabase by
+default). Downloads route by the recorded provider and never expose storage paths,
+credentials or public URLs. Downloads require explicit permission and use attachment,
+private/no-store and nosniff headers. No supplier-facing documents or emails are
+created. Upload failures roll back financial/evidence writes; failed DB commits
+attempt remote-upload compensation and safely log compensation failures for review.
+
+### API and permissions
+
+- GET/POST `/ledger/purchase-bills/parties/{UUID}/`: paginated bills / create.
+- GET/PATCH `/ledger/purchase-bills/{UUID}/`: detail/history / edit undelivered bill.
+- POST `/ledger/purchase-bills/{UUID}/deliver/`: version, request_key, delivery_date.
+- GET/POST `/ledger/purchase-payments/parties/{UUID}/`: history / confirm payment.
+- GET/PATCH `/ledger/purchase-payments/{UUID}/`: detail / receipt evidence only.
+- GET `/ledger/purchase-payments/{UUID}/evidence/{UUID}/download/`: private scan.
+
+Bill create/edit uses items, reference, date, currency, tax_enabled/tax_percent,
+discount_enabled/discount_type/discount_value, delivered and optional delivery_date.
+Payment also uses account_id, payment_method, bank_name, receipt_number, optional
+bill_id/bill_version, withholding_enabled/withholding_percent. Confirmation accepts
+JSON or multipart with JSON `payload` plus optional `file`. Evidence PATCH uses
+multipart/JSON payload {request_key, version, receipt_number} plus optional file.
+History supports search and pagination; bills additionally filter delivery status.
+
+Staff require view_purchaseledger and view_purchasebill/view_purchasepayment plus
+the matching add/change permission. Delivery requires deliver_purchasebill and
+add_purchasetransaction; payment creation additionally requires add_purchasetransaction
+and add_cashbookentry. File access requires download_purchasepayment. Frontend uses
+existing formatted permissions (ledger.purchasebill.create/edit/deliver and
+ledger.purchasepayment.create/edit/download). New permissions follow the existing
+additive executive hooks; other staff must receive explicit grants.
+
+Legacy raw BILL POST is rejected so it cannot bypass delivery. Procurement bill
+imports now create undelivered bill documents, retain their source and disappear
+from the import inbox. Existing already-posted source imports remain unchanged.
+Procurement source-item details remain fixed; delivery links the resulting posting.
+
+Migration **0026_purchasebill_purchasebillevent_purchasepayment_and_more** adds
+bills/events, immutable payments and evidence revisions, constraints/triggers and
+Input Tax / WHT Payable journal account codes. No application migration was run.
+No dependencies were added. Generated migrations were tested only on disposable
+local PostgreSQL databases; storage providers were mocked, with no live uploads.
+
 ## Payment receipts — 2026-11-08
 
 The approved receipt workflow replaces Sales Ledger's Add payment button with
@@ -163,3 +260,32 @@ inventory valuation, nominal-account configuration and year closing are not sile
 introduced. January–December remains the financial year; account opening defaults
 are zero. Migration history is retained and application migration execution is an
 operator deployment action, not part of automated testing.
+
+## Staff Ledger extension
+
+Staff identity is the existing AUTH_USER_MODEL UUID, independently of external CRM
+parties. StaffLedgerEntry is the shared financial record; StaffRetirement stores
+an ordered expense submission and StaffRetirementDecision stores its single audited
+approval/rejection. StaffLedgerDocument holds private supporting evidence;
+StaffStatement freezes the full reconciliation range. StaffLedgerSelection stores
+each operator's last selected staff member.
+
+| Operation | Debit | Credit | Cash movement |
+| --- | --- | --- | --- |
+| Salary, allowance, ordinary expense | EXPENSE | CASH | Actual payment |
+| Loan / advance | STAFF_RECEIVABLE | CASH | Actual payment |
+| Loan repayment / advance change returned | CASH | STAFF_RECEIVABLE | Actual receipt |
+| Levy / contribution / other income | CASH | INCOME | Actual receipt |
+| Approved expense covered by remaining advance | EXPENSE | STAFF_RECEIVABLE | None |
+| Approved expense above remaining advance | EXPENSE | STAFF_PAYABLE | None |
+| Approved reimbursement paid | STAFF_PAYABLE | CASH | Actual payment |
+
+One ordered expense may produce two equal-value journal pairs when it crosses the
+remaining-advance boundary. This keeps cash and expense recognition separate.
+The staff lock is taken after the submission advisory lock for every money posting,
+submission, decision and statement generation. A decision compares the reviewed
+remaining balance under that lock; all linked settlements enforce chronology and
+cannot over-settle. Approved retirement is unique per advance; rejected submissions
+can be replaced by a newly audited submission. Immutable financial records do not
+have generic update/delete APIs. The UI mirrors action permissions without replacing
+backend checks. Application migration0027 remains an explicit operator step.

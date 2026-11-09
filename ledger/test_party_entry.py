@@ -214,9 +214,36 @@ class PartyEntryTests(TestCase):
 
     def test_purchase_and_route_scope(self):
         self.path = self.path.replace("/sales/", "/purchase/")
-        bill = self.post(
-            transaction_type="BILL", ledger_kind="sales", party_id=str(uuid.uuid4())
+        self.assertEqual(
+            self.client.post(
+                self.path, self.data(transaction_type="BILL"), format="json"
+            ).status_code,
+            400,
         )
+        response = self.client.post(
+            f"/ledger/purchase-bills/parties/{self.party.pk}/",
+            {
+                **self.data(),
+                "ledger_kind": "sales",
+                "party_id": str(uuid.uuid4()),
+                "delivered": True,
+                "items": [
+                    {
+                        "description": "Supplier goods",
+                        "quantity": "1",
+                        "unit": "pcs",
+                        "unit_price": "100.00",
+                    }
+                ],
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+        from .party_ledgers import PartyTransactionSerializer
+
+        bill = PartyTransactionSerializer(
+            PartyLedgerTransaction.objects.get(pk=response.data["transaction"])
+        ).data
         self.assertEqual(bill["party"], self.party.pk)
         self.assertEqual(bill["ledger_kind"], "purchase")
         payment = self.post(

@@ -147,8 +147,7 @@ def post_party_transaction(*, actor, payload, receipt_breakdown=None):
             )
     vat, withholding = receipt_breakdown or (Decimal("0"), Decimal("0"))
     if receipt_breakdown is not None and (
-        kind != "sales"
-        or event != "PAYMENT"
+        event != "PAYMENT"
         or vat < 0
         or withholding < 0
         or withholding >= data["amount"]
@@ -210,8 +209,16 @@ def post_party_transaction(*, actor, payload, receipt_breakdown=None):
         actor=actor,
     )
     for amount, debit, credit in [
-        (withholding, "WHT_RECEIVABLE", "RECEIVABLE"),
-        (vat, "CASH", "VAT_PAYABLE"),
+        (
+            withholding,
+            "WHT_RECEIVABLE" if kind == "sales" else "PAYABLE",
+            "RECEIVABLE" if kind == "sales" else "WHT_PAYABLE",
+        ),
+        (
+            vat,
+            "CASH" if kind == "sales" else "INPUT_TAX",
+            "VAT_PAYABLE" if kind == "sales" else "CASH",
+        ),
     ]:
         if amount:
             CashBookJournal.objects.create(

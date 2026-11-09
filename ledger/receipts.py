@@ -16,6 +16,9 @@ from .balances import remaining
 
 
 class ReceiptInput(InvoiceInput):
+    expected_withholding_rate = serializers.DecimalField(
+        max_digits=5, decimal_places=2, required=False
+    )
     account_id = serializers.UUIDField()
     payment_method = serializers.ChoiceField(
         choices=["CASH", "BANK_TRANSFER", "CARD", "CHEQUE"]
@@ -47,18 +50,24 @@ def access(actor, action):
         require(actor, "ledger.add_salestransaction", "ledger.add_cashbookentry")
 
 
-def amounts(subtotal, vat_paid, withholding_applied):
+def amounts(
+    subtotal,
+    vat_paid,
+    withholding_applied,
+    vat_rate=Decimal("7.5"),
+    withholding_rate=Decimal("2"),
+):
     with localcontext() as ctx:
         ctx.prec = 40
         vat = (
-            (subtotal * Decimal(".075")).quantize(
-                Decimal(".01"), rounding=ROUND_HALF_UP
-            )
+            (subtotal * vat_rate / 100).quantize(Decimal(".01"), rounding=ROUND_HALF_UP)
             if vat_paid
             else Decimal("0.00")
         )
         withholding = (
-            (subtotal * Decimal(".02")).quantize(Decimal(".01"), rounding=ROUND_HALF_UP)
+            (subtotal * withholding_rate / 100).quantize(
+                Decimal(".01"), rounding=ROUND_HALF_UP
+            )
             if withholding_applied
             else Decimal("0.00")
         )
@@ -126,12 +135,25 @@ def create_receipt(*, actor, party_id, payload):
         raise ValidationError("Enter the name of the bank paid into.")
     gross, net = item_amounts(d["items"], d["discount_percent"])
     subtotal = sum(net, Decimal("0"))
+    from .tax_posting import policy_rate, validate_payment, payment_tax
+
+    vat_rate = invoice.tax_rate if invoice else policy_rate("VAT", d["date"])
+    withholding_rate = policy_rate("WHT", d["date"], party_id)
+    if (
+        d.get("expected_vat_rate", vat_rate) != vat_rate
+        or d.get("expected_withholding_rate", withholding_rate) != withholding_rate
+    ):
+        raise ValidationError(
+            "Tax policy changed. Reload the form and review the current rates."
+        )
     vat, withholding, received = amounts(
-        subtotal, d["vat_paid"], d["withholding_applied"]
+        subtotal, d["vat_paid"], d["withholding_applied"], vat_rate, withholding_rate
     )
+
     reference = assign_reference(SimpleNamespace(party=party))
     # Numbering lock precedes the party lock, matching invoice confirmation/delivery.
     Party.objects.select_for_update().get(pk=party.pk)
+    validate_payment(invoice, "sales", subtotal, vat, d["date"])
     allocations = []
     if (
         invoice
@@ -180,10 +202,10 @@ def create_receipt(*, actor, party_id, payload):
         "discount_percent": str(d["discount_percent"]),
         "discount_amount": str(sum(gross, Decimal("0")) - subtotal),
         "vat": str(vat),
-        "vat_rate": "7.5",
+        "vat_rate": str(vat_rate),
         "vat_paid": d["vat_paid"],
         "withholding": str(withholding),
-        "withholding_rate": "2",
+        "withholding_rate": str(withholding_rate),
         "withholding_applied": d["withholding_applied"],
         "total": str(received),
         "amount_in_words": amount_in_words(received, d["currency"]),
@@ -209,7 +231,7 @@ def create_receipt(*, actor, party_id, payload):
             for i, (row, g, n) in enumerate(zip(d["items"], gross, net), 1)
         ],
     }
-    return SalesReceipt.objects.create(
+    receipt = SalesReceipt.objects.create(
         request_key=d["request_key"],
         party=party,
         invoice=invoice,
@@ -225,3 +247,6 @@ def create_receipt(*, actor, party_id, payload):
         submission=canonical,
         actor=actor,
     )
+
+    payment_tax(receipt, "sales")
+    return receipt

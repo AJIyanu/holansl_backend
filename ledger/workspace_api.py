@@ -115,6 +115,8 @@ class AccountsView(GenericAPIView):
                 "add_cashbookentry",
                 "view_salesledger",
                 "view_purchaseledger",
+                "view_staffledger",
+                "view_taxledger",
             )
         ):
             from rest_framework.exceptions import PermissionDenied
@@ -229,10 +231,20 @@ class ProcurementInboxView(GenericAPIView):
                     "request_id": str(source.request_id),
                 }
             )
-        for source in p.SupplierPurchase.objects.filter(request__in=scope).exclude(
-            pk__in=ProcurementLedgerLink.objects.exclude(
-                supplier_purchase_id=None
-            ).values("supplier_purchase_id")
+        from .models import PurchaseBill
+
+        for source in (
+            p.SupplierPurchase.objects.filter(request__in=scope)
+            .exclude(
+                pk__in=PurchaseBill.objects.exclude(supplier_purchase=None).values(
+                    "supplier_purchase_id"
+                )
+            )
+            .exclude(
+                pk__in=ProcurementLedgerLink.objects.exclude(
+                    supplier_purchase_id=None
+                ).values("supplier_purchase_id")
+            )
         ):
             rows.append(
                 {

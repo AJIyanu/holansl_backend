@@ -30,9 +30,13 @@ def eligible_parties(kind):
     from django.db.models import Q
 
     eligible = Party.objects.directory().with_role(role).values("pk")
-    from .models import SalesInvoice
+    from .models import SalesInvoice, PurchaseBill
 
-    invoices = SalesInvoice.objects.values("party_id") if kind == "sales" else []
+    invoices = (
+        SalesInvoice.objects.values("party_id")
+        if kind == "sales"
+        else PurchaseBill.objects.values("party_id")
+    )
     historical = PartyLedgerTransaction.objects.filter(ledger_kind=kind).values(
         "party_id"
     )
@@ -163,6 +167,13 @@ class PartyLedgerTransactionsView(GenericAPIView):
         ):
             raise serializers.ValidationError(
                 "Create an invoice document and mark it delivered to post it to the sales ledger."
+            )
+        if (
+            kind == "purchase"
+            and validated.validated_data["transaction_type"] == "BILL"
+        ):
+            raise serializers.ValidationError(
+                "Create an itemized supplier bill and mark it delivered before posting debt."
             )
         record = post_party_transaction(actor=request.user, payload=payload)
         return Response(self.get_serializer(record).data, status=201)

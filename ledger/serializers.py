@@ -49,6 +49,14 @@ class CashBookVoidSerializer(serializers.Serializer):
 
 
 class CashBookSerializer(serializers.ModelSerializer):
+    tax_linked = serializers.SerializerMethodField()
+
+    def get_tax_linked(self, obj):
+        return obj.has_tax if hasattr(obj, "has_tax") else obj.tax_entries.exists()
+
+    staff_transaction_id = serializers.UUIDField(
+        source="staff_transaction.id", read_only=True, allow_null=True
+    )
     party_transaction_id = serializers.UUIDField(
         source="party_transaction.id", read_only=True, allow_null=True
     )

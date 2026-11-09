@@ -2,11 +2,15 @@
 
 from decimal import Decimal, ROUND_HALF_UP, localcontext
 from django.db.models import Sum
-from .models import SalesReceipt, CashBookJournal
+from .models import SalesReceipt, PurchasePayment, CashBookJournal
 
 
 def refund_split(source, goods_amount):
-    receipt = SalesReceipt.objects.filter(transaction=source).first()
+    receipt = (
+        (SalesReceipt if source.ledger_kind == "sales" else PurchasePayment)
+        .objects.filter(transaction=source)
+        .first()
+    )
     if not receipt:
         return Decimal("0"), Decimal("0")
     prior = source.adjustments.filter(transaction_type="REFUND").aggregate(
@@ -50,11 +54,20 @@ def correction_journals(*, record, source, action, vat, withholding, actor):
                 reverses=row,
             )
     else:
+        sales = source.ledger_kind == "sales"
         primary = True
         for value, debit, credit in [
-            (record.amount - withholding, "RECEIVABLE", "CASH"),
-            (withholding, "RECEIVABLE", "WHT_RECEIVABLE"),
-            (vat, "VAT_PAYABLE", "CASH"),
+            (
+                record.amount - withholding,
+                "RECEIVABLE" if sales else "CASH",
+                "CASH" if sales else "PAYABLE",
+            ),
+            (
+                withholding,
+                "RECEIVABLE" if sales else "WHT_PAYABLE",
+                "WHT_RECEIVABLE" if sales else "PAYABLE",
+            ),
+            (vat, "VAT_PAYABLE" if sales else "CASH", "CASH" if sales else "INPUT_TAX"),
         ]:
             if value:
                 CashBookJournal.objects.create(

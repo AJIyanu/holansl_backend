@@ -62,6 +62,14 @@ def create_entry(data, actor):
 @transaction.atomic
 def revise_entry(entry_id, data, actor, *, void=False):
     entry = CashBookEntry.objects.select_for_update().get(pk=entry_id)
+    if entry.tax_entries.exists():
+        raise ValidationError(
+            "Tax-linked cash entries require an approved tax correction."
+        )
+    if hasattr(entry, "staff_transaction"):
+        raise ValidationError(
+            "Staff-linked cash entries cannot be edited or voided independently of the staff ledger."
+        )
     if hasattr(entry, "party_transaction"):
         raise ValidationError(
             "Correct linked payments through the party ledger; independent cash-book changes are not allowed."

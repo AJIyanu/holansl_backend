@@ -192,11 +192,11 @@ def render_invoice_pdf(snapshot):
     total_rows += [
         [
             paragraph(
-                "VAT paid (7.5%)"
+                f"VAT paid ({format(Decimal(snapshot.get('vat_rate', '7.5')).normalize(), 'f')}%)"
                 if receipt and snapshot["vat_paid"]
                 else "VAT not paid"
                 if receipt
-                else "VAT (7.5%)"
+                else f"VAT ({format(Decimal(snapshot.get('vat_rate', '7.5')).normalize(), 'f')}%)"
             ),
             number(money(snapshot["vat"])),
         ]
@@ -205,7 +205,7 @@ def render_invoice_pdf(snapshot):
         total_rows += [
             [
                 paragraph(
-                    "Withholding tax (2%)"
+                    f"Withholding tax ({format(Decimal(snapshot.get('withholding_rate', '2')).normalize(), 'f')}%)"
                     if snapshot["withholding_applied"]
                     else "Withholding tax not applied"
                 ),

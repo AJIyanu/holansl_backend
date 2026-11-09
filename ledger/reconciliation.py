@@ -57,7 +57,7 @@ def snapshot(*, actor, party_id, kind, payload):
             currency=d["currency"],
             date__lte=d["date_to"],
         )
-        .select_related("created_by")
+        .select_related("created_by", "cash_entry")
         .order_by("date", "created_at", "id")
     )
     opening = sum(
@@ -122,6 +122,11 @@ def snapshot(*, actor, party_id, kind, payload):
         "outstanding": outstanding,
         "advances": advances,
     }
+    from .tax_reconciliation import enrich
+
+    enrich(
+        content, records, party.pk, kind, d["date_from"], d["date_to"], d["currency"]
+    )
     return Reconciliation.objects.create(
         party=party, ledger_kind=kind, created_by=actor, snapshot=content, **d
     )

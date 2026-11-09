@@ -16,7 +16,6 @@ from .models import (
     ProcurementInvoiceLine,
     FinanceSubmission,
 )
-from .party_posting import post_party_transaction
 from .operations import require, recognize, recognized
 
 
@@ -185,6 +184,57 @@ def act(actor, payload):
                 "id": str(existing_document.pk),
                 "message": "Invoice document already created; open it in the sales ledger.",
             }
+    if not invoice:
+        from .models import PurchaseBill
+        from .purchases import access, save_bill
+
+        access(actor, "purchasebill", "add")
+        previous_bill = PurchaseBill.objects.filter(supplier_purchase=source).first()
+        if previous_bill:
+            return {
+                "id": str(previous_bill.pk),
+                "message": "Supplier bill already created; mark it delivered in the purchase ledger.",
+            }
+        rows = []
+        for line in source.lines.select_related("supplier_offer__item"):
+            unit_price = line.unit_price.quantize(
+                Decimal(".01"), rounding=ROUND_HALF_UP
+            )
+            if (unit_price * line.quantity).quantize(
+                Decimal(".01"), rounding=ROUND_HALF_UP
+            ) != (line.unit_price * line.quantity).quantize(
+                Decimal(".01"), rounding=ROUND_HALF_UP
+            ):
+                raise ValidationError(
+                    "Source unit price cannot be represented exactly at two decimal places."
+                )
+            item = line.supplier_offer.item
+            rows.append(
+                {
+                    "description": item.description,
+                    "quantity": str(line.quantity),
+                    "unit": item.unit,
+                    "unit_price": str(unit_price),
+                }
+            )
+        bill = save_bill(
+            actor=actor,
+            party_id=source.supplier_id,
+            source=source,
+            payload={
+                "request_key": str(d["request_key"]),
+                "date": str(d["date"]),
+                "currency": source.currency,
+                "reference": source.reference or f"PROC-{source.pk}",
+                "description": d["reason"],
+                "items": rows,
+                "delivered": False,
+            },
+        )
+        return {
+            "id": str(bill.pk),
+            "message": "Supplier bill created. Mark it delivered in the purchase ledger to record debt.",
+        }
     lines = list(source.lines.all())
     amounts = [
         (line.amount if invoice else line.quantity * line.unit_price).quantize(
@@ -259,33 +309,3 @@ def act(actor, payload):
             "id": str(document.pk),
             "message": "Invoice created. Confirm it in the sales ledger; it posts only when marked delivered.",
         }
-    record = post_party_transaction(
-        actor=actor,
-        payload={
-            "request_key": str(d["request_key"]),
-            "party_id": str(
-                source.request.client_id if invoice else source.supplier_id
-            ),
-            "ledger_kind": "sales" if invoice else "purchase",
-            "transaction_type": "INVOICE" if invoice else "BILL",
-            "currency": source.currency,
-            "amount": str(sum(amounts)),
-            "date": str(d["date"]),
-            "description": d["reason"],
-            "reference": f"PROC-{source.pk}",
-        },
-    )
-    link = ProcurementLedgerLink.objects.create(
-        transaction=record, request=source.request, **{field: source}
-    )
-    if invoice:
-        for line, amount in zip(lines, amounts):
-            ProcurementInvoiceLine.objects.create(
-                link=link,
-                item=line.item,
-                po_line=line.po_line,
-                quantity=line.quantity,
-                amount=amount,
-            )
-        sync_acceptance(source.request, actor, d["date"])
-    return {"id": str(record.pk), "message": "Source posted to the ledger."}
