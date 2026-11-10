@@ -249,6 +249,7 @@ class ReceiptTests(TestCase):
             "One hundred and five thousand five hundred naira only",
             "Withholding tax",
             "Example Bank",
+            "24, Damin Plaza, MKO Abiola Way, Ringroad, Ibadan, Oyo, Nigeria.",
             "Signature and Date",
         ]:
             self.assertIn(value, text)

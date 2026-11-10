@@ -67,6 +67,7 @@ def render_invoice_pdf(snapshot):
             ]
             if company.get(key)
         )
+        contact += "\n24, Damin Plaza, MKO Abiola Way, Ringroad, Ibadan, Oyo, Nigeria."
         style = ParagraphStyle(
             "contact", fontName="Holan", fontSize=8, leading=11, alignment=2
         )

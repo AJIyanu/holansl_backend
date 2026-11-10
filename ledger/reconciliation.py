@@ -127,6 +127,27 @@ def snapshot(*, actor, party_id, kind, payload):
     enrich(
         content, records, party.pk, kind, d["date_from"], d["date_to"], d["currency"]
     )
+    # Freeze the actual supplier receipt number, not the internal PAY-UUID.
+    from .models import PurchaseReceiptEvidence
+
+    evidence = {}
+    if kind == "purchase":
+        for item in (
+            PurchaseReceiptEvidence.objects.filter(
+                payment__transaction_id__in=[r.pk for r in records]
+            )
+            .select_related("payment")
+            .order_by("payment_id", "-version")
+            .distinct("payment_id")
+        ):
+            evidence[str(item.payment.transaction_id)] = item.receipt_number
+    for row in content["transactions"]:
+        row["document_reference"] = (
+            evidence.get(row["id"], "")
+            if kind == "purchase" and row["type"] == "PAYMENT"
+            else row["reference"]
+        )
+    content["print_version"] = 2
     return Reconciliation.objects.create(
         party=party, ledger_kind=kind, created_by=actor, snapshot=content, **d
     )

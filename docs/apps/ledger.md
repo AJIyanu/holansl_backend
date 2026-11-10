@@ -825,3 +825,22 @@ maintenance window because it serialises against financial posting.
 No electronic invoicing, WHT certificates or live authority submission is included.
 The user-selected VAT timing is an operational policy, not a declaration of full
 statutory compliance; see [approved design](../design/TAX_LEDGER.md).
+
+
+## Compact printed reconciliation — 2026-11-10
+
+New party snapshots include `print_version: 2`, per-row `document_vat` (full
+signed delivery VAT, distinct from VAT first recognised on this event), and
+`document_reference`. Supplier payment reference is the latest saved supplier
+receipt number at snapshot generation; missing external numbers remain blank,
+not replaced by the internal PAY-UUID. Other invoice/receipt references retain
+the posted document number. These are additive snapshot fields; no migration or
+financial posting change. Previous immutable snapshots remain unchanged.
+
+The companion TSX print template uses the supplied HTML's compact coloured summary
+and five-column table, with right-aligned title/currency and short-month dates.
+Invoice totals use delivery VAT, cash totals use actual cash, WHT remains separate,
+and credits/adjustments remain visible when needed to reconcile the saved closing
+balance. Staff statements adopt the same visual template with staff-specific labels
+and independent due-from/due-to balances. Internal audit/review information is
+screen-only. Generate a new statement to obtain the additional snapshot fields.

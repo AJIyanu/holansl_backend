@@ -29,6 +29,7 @@ def enrich(content, records, party_id, kind, start, end, currency):
         txn = txns[UUID(row["id"])]
         events = by_txn.get(row["id"], [])
         row.update(
+            document_vat=str(sum((e.delivery_vat for e in events), ZERO)),
             goods_debit=row["debit"],
             goods_credit=row["credit"],
             vat_recognised=str(
@@ -63,6 +64,7 @@ def enrich(content, records, party_id, kind, start, end, currency):
                 "description": e.description,
                 "debit": "0.00",
                 "credit": "0.00",
+                "document_vat": str(e.delivery_vat),
                 "goods_debit": "0.00",
                 "goods_credit": "0.00",
                 "vat_recognised": str(

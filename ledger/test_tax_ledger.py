@@ -406,3 +406,50 @@ class TaxLedgerTests(TestCase):
                     "REVERSE", source_entry=str(assessment.pk), period=old_period
                 )
             )
+
+    def test_statement_freezes_delivery_vat_after_advance(self):
+        doc = self.invoice()
+        self.receipt(doc)
+        self.deliver(doc)
+        report = snapshot(
+            actor=self.actor,
+            party_id=self.party.pk,
+            kind="sales",
+            payload={
+                "request_key": str(uuid4()),
+                "date_from": str(today()),
+                "date_to": str(today()),
+                "currency": "NGN",
+            },
+        )
+        invoice_row = next(
+            row for row in report.snapshot["transactions"] if row["type"] == "INVOICE"
+        )
+        self.assertEqual(invoice_row["document_vat"], "7500.00")
+        self.assertEqual(invoice_row["vat_recognised"], "0.00")
+        self.assertEqual(invoice_row["document_reference"], doc.reference)
+        self.assertEqual(report.snapshot["print_version"], 2)
+
+    def test_supplier_statement_uses_supplier_receipt_number(self):
+        payment = create_payment(
+            actor=self.actor,
+            party_id=self.party.pk,
+            payload=self.data(receipt_number="SUP-RECEIPT-009"),
+        )
+        report = snapshot(
+            actor=self.actor,
+            party_id=self.party.pk,
+            kind="purchase",
+            payload={
+                "request_key": str(uuid4()),
+                "date_from": str(today()),
+                "date_to": str(today()),
+                "currency": "NGN",
+            },
+        )
+        row = next(
+            row
+            for row in report.snapshot["transactions"]
+            if row["id"] == str(payment.transaction_id)
+        )
+        self.assertEqual(row["document_reference"], "SUP-RECEIPT-009")

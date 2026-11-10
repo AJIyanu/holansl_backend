@@ -248,6 +248,7 @@ class InvoiceTests(TestCase):
                 "For the client",
                 "For Holan Mgt",
                 "2348073033767, 2348090964567",
+                "24, Damin Plaza, MKO Abiola Way, Ringroad, Ibadan, Oyo, Nigeria.",
                 "pcs",
                 "Billed to",
             ]:
