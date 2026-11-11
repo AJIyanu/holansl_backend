@@ -106,7 +106,7 @@ def snapshot(*, actor, party_id, kind, payload):
     content = {
         "title": "Reconciliation and Statement",
         "party": {"id": str(party.pk), "name": party.display_name},
-        "company": dict(getattr(settings, "PROCUREMENT_DOCUMENT_COMPANY", {})),
+        "company": dict(getattr(settings, "LEDGER_DOCUMENT_COMPANY", {})),
         "ledger_kind": kind,
         "currency": d["currency"],
         "date_from": str(d["date_from"]),

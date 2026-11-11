@@ -211,9 +211,8 @@ previous confirmed revisions remain immutable and printable. The reference is re
   and email requests. Email history distinguishes provider acceptance from unknown
   outcomes; retrying the same key never sends another email. Provider acceptance does
   not prove inbox delivery. No live email was sent during verification.
-- Procurement invoice imports now create undelivered invoice documents. Their source
-  item details remain linked and fixed; confirmation permits direct PO selection.
-  Existing posted invoices and procurement links remain valid.
+- Procurement invoice and supplier-bill imports were retired on 2026-11-10. The
+  application database contained no linked Ledger records at retirement.
 
 Backend routes are under `/ledger/sales-invoices/`: `parties/{party UUID}/`,
 `{invoice UUID}/`, and `{invoice UUID}/{confirm,deliver,email,pdf}/`.
@@ -235,7 +234,7 @@ accounting changes are outside this release. No dependencies were added.
 ## Current scope — approved non-tax completion (2026-11-05)
 
 The cash book, sales/purchase ledgers, settlement corrections, saved Reconciliation
-and Statement, procurement approval/import, and NGN/USD/GBP accounts are implemented.
+and Statement, and NGN/USD/GBP accounts are implemented.
 Tax is explicitly excluded: no VAT/WHT calculation, withholding settlement, tax
 accounts or remittance workflow is added. Earlier stage descriptions below are
 historical; this section supersedes their NGN-only and unavailable-feature limits.
@@ -263,11 +262,10 @@ All clients/suppliers share transaction tables linked to the CRM party UUID.
   Released allocation links and original records remain immutable. Reversal is
   supported for invoices, bills, payments and adjustments; linked credit/refund
   histories require explicit review/adjustment rather than deleting those records.
-- Standalone sales invoices accept DISPATCHED/REJECTED/ACCEPTED evidence and goods
+- Sales invoices accept DISPATCHED/REJECTED/ACCEPTED evidence and goods
   value. Acceptance transfers deferred revenue to income without changing cash or
   the party balance. Accepted goods cannot be cancelled. Dispatched goods must have
-  documented rejection before cancellation. Procurement-linked invoices use actual
-  procurement delivery/outcome evidence, not manual acceptance overrides.
+  documented rejection before cancellation.
 - Posting/correction services lock the party and serialize submission UUIDs. One
   database transaction includes related cash, journal, allocations and audit actor.
   Identical retries return existing results; changed submissions are rejected.
@@ -286,19 +284,11 @@ Later postings cannot rewrite a saved snapshot. A new snapshot is required to
 present revised figures. Reviews are staff-recorded evidence, not an external client
 signature or automatic proof of agreement.
 
-### Procurement and account settings
+### Account settings
 
-GET/POST `procurement-inbox/` requires approve_procurement plus existing procurement
-request visibility. It lists pending quotation approvals, submitted finance requests
-and unposted supplier purchases. APPROVE/REJECT decides a requested quotation revision.
-APPROVE_REQUEST/REJECT_REQUEST reviews other submitted finance requests without moving
-funds. IMPORT_INVOICE/IMPORT_BILL posts source line goods values once, using unique
-source links; the normal sales/purchase view/create permissions remain required.
-Finance submission is available again. An approved invoice line can originate a
-procurement PO without a quote; the full line quantity/value is matched and cannot
-be ordered twice. Delivery acceptance automatically recognizes linked invoice revenue,
-including when the invoice is imported after acceptance. Invoice printing/sending
-and supplier inventory/COGS valuation are not inferred from these posting operations.
+The former `procurement-inbox/` approval/import endpoint and its source-link models
+were retired on 2026-11-10. Procurement integration will be redesigned explicitly;
+ordinary Ledger invoices, bills, payments and postings remain independent.
 
 GET/POST/PATCH `accounts/` lists, adds, renames and activates/deactivates cash/bank
 accounts. Currency and account type are fixed once created; use a separate account
@@ -316,7 +306,6 @@ future extensions; current supported currencies are centralized in ledger.models
 | ledger.correct_salesledger | ledger.salesledger.correct | Sales allocations/corrections |
 | ledger.correct_purchaseledger | ledger.purchaseledger.correct | Purchase allocations/corrections |
 | ledger.recognize_salesledger | ledger.salesledger.recognize | Standalone delivery/acceptance evidence |
-| ledger.approve_procurement | ledger.procurement.approve | Scoped procurement decisions/imports |
 | ledger.view_reconciliation | ledger.reconciliation.view | Read/print saved statements |
 | ledger.add_reconciliation | ledger.reconciliation.create | Create statement snapshots |
 | ledger.confirm_reconciliation | ledger.reconciliation.confirm | Record statement reviews |
@@ -330,8 +319,9 @@ not role-name bypasses.
 
 ### Rollout and verification
 
-New migrations 0021–0023 add the accounts, signed effects, dated allocation releases,
-corrections, immutable snapshots/reviews, acceptance and procurement links/decisions.
+Historical migrations 0021–0023 added accounts, signed effects, dated allocation
+releases, corrections, immutable snapshots/reviews, acceptance and Procurement
+links/decisions. Migration 0029 retires those Procurement links and decisions.
 0021 seeds accounts before adding the FK and backfills old PAYMENT effects and
 allocation dates, temporarily disabling only their immutability triggers inside the
 migration transaction. It does not erase transactions. PostgreSQL schema locks are
@@ -622,9 +612,7 @@ remains compatible; changed discount input requires a new submission key.
 Previews/PDFs show gross line values, gross subtotal, a discount deduction and net
 subtotal when the rate is positive; zero-discount documents omit the discount row.
 Downloads and emailed attachments use confirmed snapshots. Delivery posts only
-net goods amounts to the existing sales/journal flow; procurement-linked item
-identities, quantities and source prices remain protected while net values flow
-into ProcurementInvoiceLine and acceptance/recognition. No cash movement is added.
+net goods amounts to the existing sales/journal flow. No cash movement is added.
 
 ## Staff Ledger
 

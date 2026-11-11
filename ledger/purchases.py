@@ -12,7 +12,6 @@ from .models import (
     PurchasePayment,
     PartyLedgerTransaction,
     LedgerAccount,
-    ProcurementLedgerLink,
     LedgerOperation,
 )
 from .invoices import ItemInput, today, MAX_AMOUNT
@@ -153,16 +152,9 @@ def price(d):
 
 
 def lock_bill(pk):
-    source = PurchaseBill.objects.select_related("supplier_purchase").get(pk=pk)
-    if source.supplier_purchase_id:
-        from procurement.models import ProcurementRequest
-
-        ProcurementRequest.objects.select_for_update().get(
-            pk=source.supplier_purchase.request_id
-        )
     return (
         PurchaseBill.objects.select_for_update(of=("self",))
-        .select_related("transaction", "supplier_purchase")
+        .select_related("transaction")
         .get(pk=pk)
     )
 
@@ -227,23 +219,16 @@ def posting_delivery(actor, bill, date, key):
     from .tax_posting import delivery_tax
 
     delivery_tax(bill, "purchase")
-    if bill.supplier_purchase_id:
-        ProcurementLedgerLink.objects.create(
-            transaction=record,
-            supplier_purchase=bill.supplier_purchase,
-            request=bill.supplier_purchase.request,
-        )
 
 
 @transaction.atomic
-def save_bill(*, actor, party_id, payload, bill_id=None, source=None):
+def save_bill(*, actor, party_id, payload, bill_id=None):
     access(actor, "purchasebill", "change" if bill_id else "add")
     form = BillInput(data=payload)
     form.is_valid(raise_exception=True)
     d = form.validated_data
     canonical = {
         "party": str(party_id),
-        "source": str(source.pk) if source else None,
         **form.data,
     }
     lock_submission(d["request_key"])
@@ -269,8 +254,6 @@ def save_bill(*, actor, party_id, payload, bill_id=None, source=None):
         raise ValidationError(
             "Bill changed, belongs to another supplier or has already been delivered."
         )
-    if bill and bill.supplier_purchase_id:
-        raise ValidationError("Procurement-linked bills retain their source details.")
     party = Party.objects.select_for_update().filter(pk=party_id).first()
     if (
         not party
@@ -306,7 +289,7 @@ def save_bill(*, actor, party_id, payload, bill_id=None, source=None):
     snapshot = {**form.data, **pricing}
     snapshot.pop("request_key", None)
     if not bill:
-        bill = PurchaseBill(party=party, actor=actor, supplier_purchase=source)
+        bill = PurchaseBill(party=party, actor=actor)
     else:
         bill.version += 1
     bill.reference = d["reference"]

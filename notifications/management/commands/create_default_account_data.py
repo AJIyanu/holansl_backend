@@ -3,7 +3,6 @@ ROLE_PERMISSION_RULES = {
         "apps": [
             "accounts",
             "crm",
-            "procurement",
             "ledger",
             "notifications",
         ],
@@ -24,7 +23,6 @@ ROLE_PERMISSION_RULES = {
         "apps": [
             "accounts",
             "crm",
-            "procurement",
             "ledger",
             "notifications",
         ],
@@ -45,7 +43,6 @@ ROLE_PERMISSION_RULES = {
         "apps": [
             "accounts",
             "crm",
-            "procurement",
             "ledger",
             "notifications",
         ],

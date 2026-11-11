@@ -36,7 +36,7 @@ DEPARTMENTS = [
 
 ROLE_PERMISSION_RULES = {
     "CEO": {
-        "apps": ["accounts", "crm", "procurement", "ledger", "tasks"],
+        "apps": ["accounts", "crm", "ledger", "procurement", "tasks"],
         "actions": ["add", "change", "view", "delete"],
         "extra_codenames": [
             "dispatch_notification",
@@ -58,7 +58,7 @@ ROLE_PERMISSION_RULES = {
         ],
     },
     "CTO": {
-        "apps": ["accounts", "crm", "procurement", "ledger", "tasks"],
+        "apps": ["accounts", "crm", "ledger", "procurement", "tasks"],
         "actions": ["add", "change", "view", "delete"],
         "extra_codenames": [
             "dispatch_notification",
@@ -80,7 +80,7 @@ ROLE_PERMISSION_RULES = {
         ],
     },
     "Super Admin": {
-        "apps": ["accounts", "crm", "procurement", "ledger", "tasks"],
+        "apps": ["accounts", "crm", "ledger", "procurement", "tasks"],
         "actions": ["add", "change", "view", "delete"],
         "extra_codenames": [
             "dispatch_notification",
@@ -102,7 +102,7 @@ ROLE_PERMISSION_RULES = {
         ],
     },
     "Manager": {
-        "apps": ["crm", "procurement", "ledger", "tasks"],
+        "apps": ["crm", "ledger", "procurement", "tasks"],
         "actions": ["add", "change", "view"],
         "extra_codenames": [
             "assign_task",
@@ -128,15 +128,15 @@ ROLE_PERMISSION_RULES = {
         "actions": ["add", "change", "view"],
     },
     "Software Engineer": {
-        "apps": ["accounts", "crm", "procurement", "ledger", "tasks"],
+        "apps": ["accounts", "crm", "ledger", "tasks"],
         "actions": ["view"],
     },
     "IT Technician": {
-        "apps": ["accounts", "crm", "procurement", "ledger", "tasks"],
+        "apps": ["accounts", "crm", "ledger", "tasks"],
         "actions": ["view"],
     },
     "Viewer": {
-        "apps": ["accounts", "crm", "procurement", "ledger", "tasks"],
+        "apps": ["accounts", "crm", "ledger", "tasks"],
         "actions": ["view"],
     },
 }

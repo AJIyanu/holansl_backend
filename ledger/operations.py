@@ -113,19 +113,6 @@ def operate(*, actor, party_id, kind, payload):
     require(actor, f"ledger.view_{kind}ledger", f"ledger.{permission}")
     if action in ("REFUND", "REVERSE"):
         require(actor, "ledger.add_cashbookentry")
-    # Match procurement's request -> party lock order before checking delivery.
-    if d.get("transaction_id"):
-        from .models import ProcurementLedgerLink
-
-        link = ProcurementLedgerLink.objects.filter(
-            transaction_id=d["transaction_id"],
-            transaction__party_id=party_id,
-            transaction__ledger_kind=kind,
-        ).first()
-        if link:
-            from procurement.services import lock_request
-
-            lock_request(link.request, actor)
     from .idempotency import lock_submission
 
     lock_submission(d["request_key"])
@@ -210,13 +197,9 @@ def operate(*, actor, party_id, kind, payload):
             "message": "Allocations updated; cash was unchanged.",
         }
     elif action in ("ACCEPTED", "DISPATCHED", "REJECTED"):
-        if (
-            kind != "sales"
-            or source.transaction_type != "INVOICE"
-            or hasattr(source, "procurement_link")
-        ):
+        if kind != "sales" or source.transaction_type != "INVOICE":
             raise ValidationError(
-                "Use procurement delivery evidence for a linked invoice; manual evidence is for standalone sales invoices."
+                "Goods evidence is available only for sales invoices."
             )
         if not amount:
             raise ValidationError("Enter the goods value covered by this evidence.")
@@ -268,10 +251,6 @@ def operate(*, actor, party_id, kind, payload):
                     raise ValidationError(
                         "Accepted goods cannot be cancelled. Record an authorized credit note instead."
                     )
-                if hasattr(source, "procurement_link"):
-                    from .procurement_bridge import can_cancel
-
-                    can_cancel(source)
                 dispatched = source.fulfilments.filter(status="DISPATCHED").aggregate(
                     total=Sum("amount")
                 )["total"] or Decimal("0")

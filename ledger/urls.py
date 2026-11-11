@@ -8,7 +8,6 @@ from .party_ledgers import (
 )
 
 from .workspace_api import (
-    ProcurementInboxView,
     TransactionChoicesView,
     OperationsView,
     StatementsView,
@@ -128,7 +127,6 @@ urlpatterns = [
         "party-ledgers/<str:kind>/parties/<uuid:party_id>/choices/",
         TransactionChoicesView.as_view(),
     ),
-    path("procurement-inbox/", ProcurementInboxView.as_view()),
     path("accounts/", AccountsView.as_view()),
     path("statements/<uuid:pk>/", StatementView.as_view()),
     path(

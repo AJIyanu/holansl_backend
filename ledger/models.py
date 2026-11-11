@@ -243,7 +243,6 @@ class PartyLedgerTransaction(models.Model):
             ("add_purchasetransaction", "Can post purchase ledger transactions"),
             ("correct_salesledger", "Can correct sales ledger and allocations"),
             ("correct_purchaseledger", "Can correct purchase ledger and allocations"),
-            ("approve_procurement", "Can approve procurement financial documents"),
             ("recognize_salesledger", "Can record sales delivery acceptance"),
         ]
         ordering = ["date", "created_at", "id"]
@@ -450,85 +449,6 @@ class RevenueRecognition(models.Model):
         default_permissions = ()
 
 
-class ProcurementLedgerLink(models.Model):
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    transaction = models.OneToOneField(
-        PartyLedgerTransaction,
-        on_delete=models.PROTECT,
-        related_name="procurement_link",
-    )
-    finance_request = models.OneToOneField(
-        "procurement.FinanceRequest", null=True, blank=True, on_delete=models.PROTECT
-    )
-    supplier_purchase = models.OneToOneField(
-        "procurement.SupplierPurchase", null=True, blank=True, on_delete=models.PROTECT
-    )
-    request = models.ForeignKey(
-        "procurement.ProcurementRequest", on_delete=models.PROTECT
-    )
-
-    class Meta:
-        default_permissions = ()
-
-
-class ProcurementInvoiceLine(models.Model):
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    link = models.ForeignKey(
-        ProcurementLedgerLink, on_delete=models.PROTECT, related_name="lines"
-    )
-    item = models.ForeignKey("procurement.RequestItem", on_delete=models.PROTECT)
-    po_line = models.ForeignKey(
-        "procurement.ClientPurchaseOrderLine",
-        null=True,
-        blank=True,
-        on_delete=models.PROTECT,
-    )
-    quantity = models.DecimalField(max_digits=18, decimal_places=4)
-    amount = models.DecimalField(max_digits=18, decimal_places=2)
-
-    class Meta:
-        default_permissions = ()
-
-
-class ProcurementApproval(models.Model):
-    revision = models.OneToOneField(
-        "procurement.ClientQuotationRevision", on_delete=models.PROTECT
-    )
-    approved = models.BooleanField()
-    reason = models.CharField(max_length=500)
-    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        default_permissions = ()
-
-
-class FinanceSubmission(models.Model):
-    request = models.OneToOneField(
-        "procurement.FinanceRequest", on_delete=models.PROTECT
-    )
-    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        default_permissions = ()
-
-
-class FinanceApproval(models.Model):
-    """Review of a submitted procurement request; does not itself move funds."""
-
-    request = models.OneToOneField(
-        "procurement.FinanceRequest", on_delete=models.PROTECT
-    )
-    approved = models.BooleanField()
-    reason = models.CharField(max_length=500)
-    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        default_permissions = ()
-
-
 class InvoiceClientCode(models.Model):
     party = models.OneToOneField(
         "crm.Party", on_delete=models.PROTECT, primary_key=True
@@ -577,9 +497,6 @@ class SalesInvoice(models.Model):
         on_delete=models.PROTECT,
         related_name="invoice_document",
     )
-    finance_request = models.OneToOneField(
-        "procurement.FinanceRequest", null=True, blank=True, on_delete=models.PROTECT
-    )
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+"
     )
@@ -616,15 +533,6 @@ class SalesInvoiceItem(models.Model):
     unit = models.CharField(max_length=40)
     unit_price = models.DecimalField(max_digits=18, decimal_places=2)
     amount = models.DecimalField(max_digits=18, decimal_places=2)
-    source_item = models.ForeignKey(
-        "procurement.RequestItem", null=True, blank=True, on_delete=models.PROTECT
-    )
-    po_line = models.ForeignKey(
-        "procurement.ClientPurchaseOrderLine",
-        null=True,
-        blank=True,
-        on_delete=models.PROTECT,
-    )
 
     class Meta:
         default_permissions = ()
@@ -794,9 +702,6 @@ class PurchaseBill(models.Model):
         blank=True,
         on_delete=models.PROTECT,
         related_name="bill_document",
-    )
-    supplier_purchase = models.OneToOneField(
-        "procurement.SupplierPurchase", null=True, blank=True, on_delete=models.PROTECT
     )
     actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
     created_at = models.DateTimeField(auto_now_add=True)

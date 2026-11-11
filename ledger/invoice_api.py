@@ -58,7 +58,6 @@ class InvoiceSerializer(serializers.ModelSerializer):
             "confirmed",
             "delivered_at",
             "posted_transaction",
-            "finance_request",
             "items",
             "created_by_name",
             "updated_by_name",
@@ -165,7 +164,7 @@ class InvoiceView(GenericAPIView):
             pk=pk,
         )
         data = dict(InvoiceSerializer(invoice).data)
-        data["company"] = dict(settings.PROCUREMENT_DOCUMENT_COMPANY)
+        data["company"] = dict(settings.LEDGER_DOCUMENT_COMPANY)
         data["pricing"] = invoice_pricing(invoice)
         data["revisions"] = list(
             invoice.revisions.order_by("-version").values(

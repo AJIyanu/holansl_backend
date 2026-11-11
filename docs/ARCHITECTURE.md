@@ -32,8 +32,8 @@ configuration rather than assuming documentation proves live service availabilit
 | crm           | Built                | Shared Party identity, profiles, roles, affiliations, contacts, documents and history        |
 | tasks         | Built                | Personal/staff/department assignments, batches, lifecycle, comments, reminders and activity  |
 | notifications | Built infrastructure | Events, recipients, inbox, preferences/templates, outbox/retries; WhatsApp adapter not built |
-| procurement   | Backend built and migrated; frontend pending | Requests, sourcing, quote revisions, PO lines, purchasing/delivery and financial requests    |
-| ledger | Non-tax ledger built | Cash/currency accounts, party postings and corrections, acceptance, snapshots and procurement links |
+| procurement   | Active first redesign phase | CRM-backed item requests, independent item trackers, images and append-only activity history |
+| ledger | Non-tax ledger built | Cash/currency accounts, party postings and corrections, acceptance and snapshots |
 | reports       | Future scope         | Consume stable domain data; no registered app currently                                      |
 
 Accounts supplies identity and permissions. CRM supplies external parties.
@@ -42,9 +42,9 @@ exist. Preserve organisation and individual-contact identity independently and
 retain historical references when an affiliation ends. Avoid duplicate/ghost
 clients and suppliers or circular model ownership.
 
-Procurement retains finance requests as drafts. Official financial approval and
-posting now use scoped ledger approval and source-linked posting services. Notifications receives events but does not control business state.
-Integrate existing tasks/notifications where required rather than rebuilding them.
+The retired Procurement domain has no active finance requests or Ledger bridge.
+Integrate existing tasks and notifications when each redesigned Procurement
+feature is explicitly approved rather than rebuilding those platform services.
 
 ## Current API conventions to preserve
 

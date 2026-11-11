@@ -14,7 +14,7 @@ from reportlab.platypus import (
     Paragraph,
 )
 from xml.sax.saxutils import escape
-from procurement.document_layout import paragraph, ASSETS
+from .document_layout import paragraph, ASSETS
 from .invoice_units import display_quantity
 
 

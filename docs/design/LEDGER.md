@@ -23,9 +23,8 @@ previous confirmed revisions remain immutable and printable. The reference is re
   and email requests. Email history distinguishes provider acceptance from unknown
   outcomes; retrying the same key never sends another email. Provider acceptance does
   not prove inbox delivery. No live email was sent during verification.
-- Procurement invoice imports now create undelivered invoice documents. Their source
-  item details remain linked and fixed; confirmation permits direct PO selection.
-  Existing posted invoices and procurement links remain valid.
+- Procurement invoice imports and source links were retired on 2026-11-10. No
+  linked Ledger records existed in the application database at retirement.
 
 Backend routes are under `/ledger/sales-invoices/`: `parties/{party UUID}/`,
 `{invoice UUID}/`, and `{invoice UUID}/{confirm,deliver,email,pdf}/`.
@@ -68,6 +67,6 @@ for subsequent stages. See the API document for current paths and permissions.
 
 The user approved the remaining non-tax party-ledger stages together: advance
 allocation/correction, credit/refund/reversal, full dated reconciliation, printable
-saved snapshots/reviews, procurement approval/import/acceptance and separate
-NGN/USD/GBP cash/bank accounts. See [current contracts](../apps/ledger.md). Tax is
+saved snapshots/reviews and separate NGN/USD/GBP cash/bank accounts. The former
+Procurement bridge is retired. See [current contracts](../apps/ledger.md). Tax is
 explicitly deferred to a separate ledger; prior VAT/WHT plans are not enabled.

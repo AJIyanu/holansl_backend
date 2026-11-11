@@ -97,26 +97,13 @@ role-assignment controls may need a separately approved change_role visibility c
   approved scoped changes; token configuration does not imply every page is redesigned.
 
 
-## P01 — Procurement backend rollout and companion work
+## P01 — Procurement redesign
 
-- [x] Applied `procurement.0003_procurement_item_lifecycle` with explicit user
-  approval on 2026-09-04. Verified all 27 tables and 113 procurement permissions;
-  CEO and CTO each hold the 113 permissions. Only this migration was in the plan.
-- [ ] Build the frontend against [the implemented API](apps/procurement.md),
-  including milestone/history toggle, replacement attempts and explicit finance
-  placeholders. Backend was implemented first as requested.
-- [ ] Schedule `expire_procurement_quotations` after deployment; reason: expiry
-  history/notifications need an operator-managed scheduled command. Timestamp
-  validity remains available on reads without running a job.
-- [x] Implement approved company numbering and sample-based quotation/waybill
-  PDF/JPG generation. Configure the current office address before official use;
-  the obsolete sample addresses are never defaults.
-- [ ] Agree cancellation/reversal/correction rules for committed quantities and
-  draft delivery reservations before adding such write actions. Reason: these
-  can invalidate purchase/delivery evidence; raw history edits are prohibited.
-- [ ] Decide product catalogue ownership and any approval thresholds. Current
-  requested items carry description/unit snapshots and use assigned action
-  permissions; no role-name or monetary approval policy is assumed.
+- [x] Retire the previous Procurement backend and Ledger integration; preserve a
+  migration-history shell and replace frontend destinations with under-development
+  pages. The approved retirement migrations were applied on 2026-11-11 and verified.
+- [ ] Design and implement each Procurement navigation feature in order. Each
+  feature requires explicit agreement and backend-first implementation.
 
 ## Ledger — reconciled inventory, 2026-11-10
 

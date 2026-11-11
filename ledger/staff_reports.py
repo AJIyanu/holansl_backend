@@ -96,7 +96,7 @@ def report(staff, period, *, include_transactions=True):
         totals["reimbursement_due"] += source["payable"]
     return {
         "staff": {"id": str(staff.pk), "name": staff_name(staff)},
-        "company": getattr(settings, "PROCUREMENT_DOCUMENT_COMPANY", {})
+        "company": getattr(settings, "LEDGER_DOCUMENT_COMPANY", {})
         or {"name": "Holan Integrated Services Limited"},
         "currency": period["currency"],
         "date_from": str(period["date_from"]),

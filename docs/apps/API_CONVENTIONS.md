@@ -5,7 +5,8 @@ Verified against local source on 2026-09-03.
 ## Base URLs and authentication
 
 Backend namespaces are /account/, /crm/, /tasks/, /notifications/ /procurement/ and /ledger/.
-Procurement and ledger require their pending migrations before serving the new APIs.
+Newly implemented endpoints require their corresponding application migrations
+before they can serve traffic.
 There is no universal /api/ prefix on Django business endpoints.
 Next.js /api/* paths are a different application layer.
 

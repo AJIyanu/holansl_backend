@@ -196,7 +196,7 @@ def create_receipt(*, actor, party_id, payload):
         "billing_address": d["billing_address"],
         "recipient_email": d["recipient_email"],
         "notes": d["notes"],
-        "company": dict(settings.PROCUREMENT_DOCUMENT_COMPANY),
+        "company": dict(settings.LEDGER_DOCUMENT_COMPANY),
         "subtotal": str(subtotal),
         "gross_subtotal": str(sum(gross, Decimal("0"))),
         "discount_percent": str(d["discount_percent"]),

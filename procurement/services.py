@@ -1,1016 +1,275 @@
-"""Transactional business operations. Views never directly edit workflow state."""
-
-from decimal import Decimal, ROUND_HALF_UP
-import logging
-from datetime import datetime, time
+import itertools
+import string
+import uuid
 from zoneinfo import ZoneInfo
 
-from django.core.exceptions import ValidationError as DjangoValidationError
-from django.db import transaction
-from django.db.models import Q, Sum
+from django.db import connection, transaction
+from django.db.models import Max
 from django.utils import timezone
-from rest_framework.exceptions import NotFound, ValidationError
+from rest_framework.exceptions import ValidationError
 
-from accounts.models import AuditLog
-from crm.integrations import validate_client_contact, validate_party_for_new_business
+from crm.document_services import (
+    calculate_document_checksum,
+    sanitize_document_filename,
+)
+from crm.models import Party, PartyAffiliation
+from crm.storage import get_document_storage
 from . import models as m
 
-
-def stamp(user):
-    return {
-        "created_by": user,
-        "created_by_name": (user.get_full_name() or user.username)
-        if user
-        else "System",
-    }
-
-
-def make(model, user, **fields):
-    return model.objects.create(**stamp(user), **fields)
-
-
-def visible_requests(user):
-    qs = m.ProcurementRequest.objects.all()
-    if not user.is_active or not (user.is_staff or user.is_superuser):
-        return qs.none()
-    if not user.has_perm("procurement.view_procurementrequest"):
-        return qs.none()
-    if user.has_perm("procurement.view_all_procurementrequest"):
-        return qs
-    condition = Q(owner=user)
-    profile = getattr(user, "profile", None)
-    if (
-        profile
-        and profile.department_id
-        and user.has_perm("procurement.view_department_procurementrequest")
-    ):
-        condition |= Q(department_id=profile.department_id)
-    return qs.filter(condition)
+LAGOS = ZoneInfo("Africa/Lagos")
+ACTIVITY_TITLES = {
+    "SOURCING": "Item is being sourced",
+    "SUPPLIER_SEARCH": "Supplier search in progress",
+    "ITEM_FOUND": "Item found",
+    "PRICE_REVIEW": "Price review required",
+    "WAITING_CLIENT": "Waiting for client response",
+    "WAITING_INTERNAL": "Waiting for internal review",
+    "PAID": "Item paid for",
+    "IN_TRANSIT": "Item being transported",
+    "RECEIVED_BY_HOLAN": "Item received by Holan",
+    "PREPARED_FOR_DELIVERY": "Item prepared for delivery",
+    "GENERAL_UPDATE": "General update",
+    "CUSTOM": "Custom",
+}
+STATUS_TITLES = {
+    "OPEN": "Item reopened",
+    "SUSPENDED": "Item suspended",
+    "DELIVERED": "Item delivered",
+    "CLOSED": "Item closed",
+}
 
 
-def lock_request(request, user, *, submitted=True):
-    try:
-        obj = visible_requests(user).select_for_update().get(pk=request.pk)
-    except m.ProcurementRequest.DoesNotExist:
-        raise NotFound()
-    if submitted and not obj.submitted_at:
+def actor_name(user):
+    return user.get_full_name().strip() or user.email
+
+
+def ensure_client(party):
+    if not Party.objects.active().with_role("CLIENT").filter(pk=party.pk).exists():
+        raise ValidationError({"client": "Choose an active CRM client."})
+
+
+def ensure_requester(client, requester):
+    if requester is None or requester.pk == client.pk:
+        return
+    if not PartyAffiliation.objects.filter(
+        organisation=client, person=requester, is_current=True
+    ).exists():
         raise ValidationError(
-            "Submit the request before recording operational activity."
+            {
+                "requester": "Choose the client or a current contact affiliated with the client."
+            }
         )
-    return obj
 
 
-def check(condition, message):
-    if not condition:
-        raise ValidationError(message)
-
-
-def same_request(request, actual):
-    check(
-        request.pk == actual.pk,
-        "Related records must belong to the same procurement request.",
+def client_code(user, client):
+    existing = m.ProcurementClientCode.objects.filter(client=client).first()
+    if existing:
+        return existing
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT pg_advisory_xact_lock(hashtextextended('procurement.client.code', 0))"
+        )
+    existing = m.ProcurementClientCode.objects.filter(client=client).first()
+    if existing:
+        return existing
+    letters = "".join(
+        c for c in client.display_name.upper() if c in string.ascii_uppercase
+    )
+    preferred = letters[:3].ljust(3, "X")
+    occupied = set(m.ProcurementClientCode.objects.values_list("code", flat=True))
+    code = (
+        preferred
+        if preferred not in occupied
+        else next(
+            (
+                "".join(chars)
+                for chars in itertools.product(string.ascii_uppercase, repeat=3)
+                if "".join(chars) not in occupied
+            ),
+            None,
+        )
+    )
+    if not code:
+        raise ValidationError(
+            {"client": "No three-letter client code remains available."}
+        )
+    return m.ProcurementClientCode.objects.create(
+        client=client, code=code, created_by=user, created_by_name=actor_name(user)
     )
 
 
-def validate_party(party, role):
-    try:
-        validate_party_for_new_business(party, role=role)
-    except DjangoValidationError as exc:
-        raise ValidationError(exc.message_dict)
-
-
-def contact(request, party):
-    check(party is not None, "A receiving client contact is required.")
-    try:
-        validate_client_contact(client=request.client, contact_party=party)
-    except DjangoValidationError as exc:
-        raise ValidationError(exc.message_dict)
-
-
-def document(request, doc, category=None):
-    if doc:
-        same_request(request, doc.request)
-        if category:
-            check(doc.category == category, f"A {category} document is required.")
-
-
-def expiry_datetime(value):
-    if value is None or isinstance(value, datetime):
-        return value
-    return timezone.make_aware(
-        datetime.combine(value, time.max), ZoneInfo("Africa/Lagos")
-    )
-
-
-def quotation_amounts(row):
-    row.pop("estimated_unit_cost", None)
-    subtotal = row["quantity"] * row["unit_price"]
-    value = Decimal(str(row.pop("discount_value", 0)))
-    mode = row.pop("discount_type", "AMOUNT")
-    check(mode != "PERCENT" or value <= 100, "Percentage discount cannot exceed 100%.")
-    discount = subtotal * value / Decimal(100) if mode == "PERCENT" else value
-    check(discount <= subtotal, "Discount exceeds line value.")
-    tax_rate = Decimal(str(row.pop("tax_rate", "7.5")))
-    tax = (subtotal - discount) * tax_rate / Decimal(100)
-    places = Decimal("0.0001")
-    row.update(
-        discount_type=mode,
-        discount_value=value,
-        discount=discount.quantize(places, rounding=ROUND_HALF_UP),
-        tax_rate=tax_rate,
-        tax=tax.quantize(places, rounding=ROUND_HALF_UP),
-    )
-
-
-def total(qs, field="quantity"):
-    return qs.aggregate(n=Sum(field))["n"] or Decimal(0)
-
-
-def not_future(value):
-    check(value <= timezone.now(), "An occurrence date cannot be in the future.")
-
-
-def event(item, kind, user, **kwargs):
-    entry = make(m.ItemTrackingEvent, user, item=item, kind=kind, **kwargs)
-    AuditLog.objects.create(
-        user=user,
-        event_category="CRUD",
-        event_type="UPDATE",
-        status="SUCCESS",
-        app_label="procurement",
-        resource="requestitem",
-        action=kind.lower(),
-        object_id=str(item.id),
-        metadata={"event_id": str(entry.id)},
-    )
-    # Persist dashboard notifications in the same transaction; no outbound email.
-    owner = item.request.owner
-    if (
-        kind in {"ITEM_REJECTED", "QUOTATION_EXPIRED", "CLOSED_REJECTED"}
-        and owner.is_active
-        and owner != user
-        and visible_requests(owner).filter(pk=item.request_id).exists()
-    ):
-        from notifications.services import notify
-
-        try:
-            with transaction.atomic():
-                notify(
-                    recipients=[owner],
-                    actor=user,
-                    title="Procurement item needs attention",
-                    message="An assigned procurement item has a new workflow event.",
-                    category="procurement",
-                    notification_type=kind.lower(),
-                    channels=["DASHBOARD"],
-                    source=entry,
-                    deduplication_key=f"procurement:{entry.id}",
-                )
-        except Exception:
-            logging.getLogger(__name__).warning(
-                "Unable to enqueue procurement notification; event_id=%s", entry.id
-            )
-    return entry
+def allocate_codes(user, client, count, registered_at):
+    code = client_code(user, client).code
+    local = registered_at.astimezone(LAGOS)
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT pg_advisory_xact_lock(hashtextextended('procurement.item.sequence', 0))"
+        )
+    sequence, _ = m.ItemDailySequence.objects.get_or_create(date=local.date())
+    sequence = m.ItemDailySequence.objects.select_for_update().get(pk=sequence.pk)
+    start = sequence.next_serial
+    sequence.next_serial += count
+    sequence.save(update_fields=["next_serial"])
+    stamp = local.strftime("%y%m%d%H%M")
+    return [
+        f"Item-{code}-{stamp}-{serial:02d}" for serial in range(start, start + count)
+    ]
 
 
 @transaction.atomic
-def create_request(user, data, previous_item=None):
-    data = dict(data)
+def create_request(user, data):
     items = data.pop("items")
-    validate_party(data["client"], "CLIENT")
-    if data.get("contact"):
-        try:
-            validate_client_contact(
-                client=data["client"], contact_party=data["contact"]
-            )
-        except DjangoValidationError as exc:
-            raise ValidationError(exc.message_dict)
-    from accounts.models import Department
-
-    department = (
-        Department.objects.filter(name__iexact="Procurement").first()
-        or Department.objects.filter(code="PROC").first()
+    client, requester = data["client"], data.get("requester")
+    ensure_client(client)
+    ensure_requester(client, requester)
+    now = timezone.now()
+    codes = allocate_codes(user, client, len(items), now)
+    name = actor_name(user)
+    request = m.ItemRequest.objects.create(
+        **data,
+        client_name=client.display_name,
+        requester_name=requester.display_name if requester else client.display_name,
+        created_by=user,
+        created_by_name=name,
     )
-    check(
-        department is not None,
-        "Configure the Procurement department before registering requests.",
-    )
-    check(
-        user.is_active and (user.is_staff or user.is_superuser),
-        "Request owner must be active staff.",
-    )
-    data["owner"] = user
-    data["department"] = department
-    not_future(data.get("received_at", timezone.now()))
-    obj = make(m.ProcurementRequest, user, client_name=str(data["client"]), **data)
-    for row in items:
-        item = make(
-            m.RequestItem, user, request=obj, previous_item=previous_item, **row
+    for code, values in zip(codes, items):
+        item = m.RequestedItem.objects.create(
+            request=request, code=code, created_by=user, created_by_name=name, **values
         )
-        event(
-            item,
-            "REQUEST_RECEIVED",
-            user,
-            quantity=item.quantity,
-            occurred_at=obj.received_at,
+        m.ItemActivity.objects.create(
+            item=item,
+            category="SYSTEM",
+            title_code="REQUEST_RECEIVED",
+            title="Request received",
+            description="Item request registered.",
+            occurred_at=request.received_at,
+            status_result="OPEN",
+            created_by=user,
+            created_by_name=name,
         )
-    return obj
+    return request
 
 
 @transaction.atomic
-def submit_request(user, obj, expected_version=None):
-    obj = lock_request(obj, user, submitted=False)
-    check(obj.submitted_at is None, "Request has already been submitted.")
-    check(
-        expected_version is None or obj.version == expected_version,
-        "Request changed; reload and review before submitting.",
+def add_activity(user, item, data):
+    item = m.RequestedItem.objects.select_for_update().get(pk=item.pk)
+    if item.status in {"DELIVERED", "CLOSED"}:
+        raise ValidationError("Completed items cannot receive new activities.")
+    code = data["title_code"].upper()
+    if data["category"] == "COMMENT":
+        title = "Comment"
+        code = "COMMENT"
+    elif code == "CUSTOM":
+        title = data.get("custom_title", "").strip()
+        if not title:
+            raise ValidationError({"custom_title": "Enter the custom activity title."})
+    else:
+        title = ACTIVITY_TITLES.get(code)
+        if not title:
+            raise ValidationError({"title_code": "Choose a suggested title or Custom."})
+    return m.ItemActivity.objects.create(
+        item=item,
+        category=data["category"],
+        title_code=code,
+        title=title,
+        description=data.get("description", ""),
+        occurred_at=data.get("occurred_at", timezone.now()),
+        created_by=user,
+        created_by_name=actor_name(user),
     )
-    validate_party(obj.client, "CLIENT")
-    check(obj.items.exists(), "At least one item is required.")
-    obj.submitted_at = timezone.now()
-    obj.version += 1
-    obj.save(update_fields=["submitted_at", "version"])
-    for item in obj.items.all():
-        if item.events.filter(kind="REQUEST_RECEIVED").exists():
-            continue
-        event(
-            item,
-            "REQUEST_RECEIVED",
-            user,
-            quantity=item.quantity,
-            occurred_at=obj.received_at,
-        )
-    return obj
 
 
 @transaction.atomic
-def edit_item(user, item, data):
-    request = lock_request(item.request, user, submitted=False)
-    check(
-        request.submitted_at is None,
-        "Submitted request items cannot be changed; a controlled amendment is required.",
+def change_status(user, item, data):
+    item = m.RequestedItem.objects.select_for_update().get(pk=item.pk)
+    target = data["status"]
+    allowed = {
+        "OPEN": {"SUSPENDED", "DELIVERED", "CLOSED"},
+        "SUSPENDED": {"OPEN", "CLOSED"},
+        "DELIVERED": set(),
+        "CLOSED": set(),
+    }
+    if target not in allowed[item.status]:
+        raise ValidationError({"status": f"Cannot change {item.status} to {target}."})
+    occurred = data.get("occurred_at", timezone.now())
+    item.status = target
+    if target in {"DELIVERED", "CLOSED"}:
+        item.completed_at = occurred
+        item.completed_by = user
+    else:
+        item.completed_at = None
+        item.completed_by = None
+    item.save(update_fields=["status", "completed_at", "completed_by", "updated_at"])
+    m.ItemActivity.objects.create(
+        item=item,
+        category="SYSTEM",
+        title_code=f"STATUS_{target}",
+        title=STATUS_TITLES[target],
+        description=data["reason"],
+        occurred_at=occurred,
+        status_result=target,
+        created_by=user,
+        created_by_name=actor_name(user),
     )
-    check(
-        request.version == data["expected_version"],
-        "Request changed; reload before editing.",
-    )
-    item.refresh_from_db()
-    changes = []
-    for field in ["description", "specification", "quantity", "unit", "required_date"]:
-        if field in data and getattr(item, field) != data[field]:
-            changes.append(f"{field}: {getattr(item, field)} → {data[field]}")
-            setattr(item, field, data[field])
-    if changes:
-        item.save(
-            update_fields=[
-                "description",
-                "specification",
-                "quantity",
-                "unit",
-                "required_date",
-            ]
-        )
-        request.version += 1
-        request.save(update_fields=["version"])
-        event(
-            item,
-            "DRAFT_ITEM_UPDATED",
-            user,
-            quantity=item.quantity,
-            reason="; ".join(changes),
-        )
     return item
 
 
 @transaction.atomic
-def edit_request(user, obj, data):
-    obj = lock_request(obj, user, submitted=False)
-    check(obj.submitted_at is None, "Submitted requests are immutable.")
-    check(
-        obj.version == data["expected_version"],
-        "Request changed; reload before editing.",
+def upload_image(user, item, uploaded, caption=""):
+    item = (
+        m.RequestedItem.objects.select_for_update()
+        .select_related("request")
+        .get(pk=item.pk)
     )
-    if "notes" in data:
-        obj.notes = data["notes"]
-    obj.version += 1
-    obj.save(update_fields=["notes", "version"])
-    return obj
-
-
-@transaction.atomic
-def create_offer(user, data, previous=None):
-    data = dict(data)
-    request = lock_request(data["request"], user)
-    rows = data.pop("lines")
-    validate_party(data["supplier"], "SUPPLIER")
-    document(request, data.get("document"))
-    if previous:
-        same_request(request, previous.request)
-        check(
-            data["supplier"] == previous.supplier,
-            "A supplier revision must retain its supplier.",
-        )
-        check(
-            not m.SupplierQuotation.objects.filter(previous=previous).exists(),
-            "Revise the latest supplier quotation.",
-        )
-        check(data.get("reason"), "Revision reason is required.")
-        data["previous"] = previous
-    data["expires_at"] = expiry_datetime(data.get("expires_at"))
-    if data.get("expires_at"):
-        check(
-            data["expires_at"] > timezone.now(),
-            "New supplier offers must not be expired.",
-        )
-    obj = make(m.SupplierQuotation, user, supplier_name=str(data["supplier"]), **data)
-    for row in rows:
-        same_request(request, row["item"].request)
-        if row.get("attempt"):
-            check(
-                row["attempt"].item_id == row["item"].id,
-                "Attempt belongs to another item.",
-            )
-        line = make(m.SupplierQuotationLine, user, quotation=obj, **row)
-        event(
-            line.item,
-            "ITEM_SOURCED",
-            user,
-            supplier_offer=line,
-            attempt=line.attempt,
-            quantity=line.quantity,
-        )
-    return obj
-
-
-@transaction.atomic
-def create_quote(user, data, quotation=None):
-    data = dict(data)
-    request = lock_request(data.pop("request"), user)
-    rows = data.pop("lines")
-    document(request, data.get("document"), "QUOTATION")
-    if quotation:
-        same_request(request, quotation.request)
-        check(data.get("reason"), "A quotation revision requires a reason.")
-        number = quotation.revisions.count() + 1
-    else:
-        quotation = make(m.ClientQuotation, user, request=request)
-        number = 1
-    data["expires_at"] = expiry_datetime(data.get("expires_at"))
-    if data.get("expires_at"):
-        check(
-            data["expires_at"] > timezone.now(), "New quotations must not be expired."
-        )
-    revision = make(
-        m.ClientQuotationRevision, user, quotation=quotation, number=number, **data
+    if item.images.count() >= 10:
+        raise ValidationError({"file": "An item can have at most 10 sample images."})
+    if uploaded.size > 10 * 1024 * 1024:
+        raise ValidationError({"file": "Each image must be 10 MB or smaller."})
+    mime = (uploaded.content_type or "").lower()
+    if mime not in {"image/jpeg", "image/png", "image/webp"}:
+        raise ValidationError({"file": "Upload a JPEG, PNG or WebP image."})
+    filename = sanitize_document_filename(uploaded.name)
+    checksum = calculate_document_checksum(uploaded)
+    document_id = uuid.uuid4()
+    position = (item.images.aggregate(value=Max("position"))["value"] or -1) + 1
+    storage = get_document_storage("supabase")
+    uploaded.seek(0)
+    stored = storage.upload(
+        document_id=document_id,
+        party_id=item.request.client_id,
+        category=f"PROCUREMENT/ITEM_REQUESTS/{item.code}",
+        filename=filename,
+        mime_type=mime,
+        size_bytes=uploaded.size,
+        file_object=uploaded.file,
     )
-    seen = set()
-    for row in rows:
-        same_request(request, row["item"].request)
-        check(
-            row["item"].id not in seen,
-            "An item may occur only once in a quotation revision.",
-        )
-        seen.add(row["item"].id)
-        offer = row["supplier_offer"]
-        check(
-            offer.item_id == row["item"].id, "Supplier offer belongs to another item."
-        )
-        check(
-            offer.quotation.currency == revision.currency,
-            "Currency conversion is not implemented; use matching currencies.",
-        )
-        check(
-            not offer.quotation.expires_at
-            or offer.quotation.expires_at > timezone.now(),
-            "Supplier offer has expired.",
-        )
-        quotation_amounts(row)
-        make(m.ClientQuotationLine, user, revision=revision, **row)
-        if number > 1:
-            event(
-                row["item"],
-                "QUOTATION_REVIEWED",
-                user,
-                quote_revision=revision,
-                reason=revision.reason,
-            )
-    return revision
-
-
-@transaction.atomic
-def issue_quote(user, revision, data):
-    request = lock_request(revision.quotation.request, user)
-    from .document_registry import require_ledger_approval
-
-    require_ledger_approval(revision)
-    check(
-        not revision.expires_at or revision.expires_at > timezone.now(),
-        "Expired quotations must be revised before sending.",
-    )
-    check(
-        revision.number == revision.quotation.revisions.count(),
-        "Only the latest revision can be sent.",
-    )
-    check(
-        revision.document_id,
-        "Attach the quotation document when creating the revision before recording it sent.",
-    )
-    contact(request, data["recipient"])
-    occurred = data.get("occurred_at", timezone.now())
-    not_future(occurred)
-    check(
-        occurred >= revision.created_at,
-        "Sending cannot precede the quotation revision.",
-    )
-    obj = make(
-        m.QuotationIssue,
-        user,
-        revision=revision,
-        recipient_name=str(data["recipient"]),
-        **data,
-    )
-    first_issue = revision.issues.count() == 1
-    for line in revision.lines.all():
-        if revision.number > 1 and first_issue:
-            event(
-                line.item,
-                "QUOTATION_REISSUED",
-                user,
-                quote_revision=revision,
-                reason=revision.reason,
-                occurred_at=occurred,
-            )
-        event(
-            line.item,
-            "QUOTATION_SENT",
-            user,
-            quote_revision=revision,
-            document=revision.document,
-            quantity=line.quantity,
-            occurred_at=occurred,
-        )
-    return obj
-
-
-@transaction.atomic
-def create_po(user, data):
-    data = dict(data)
-    request = lock_request(data["request"], user)
-    rows = data.pop("lines")
-    if data.get("verbal"):
-        check(data.get("evidence"), "Verbal orders require confirmation evidence.")
-    else:
-        check(data.get("document"), "Documented orders require the PO document.")
-    document(request, data.get("document"), "PURCHASE_ORDER")
-    occurred = data.get("received_at", timezone.now())
-    not_future(occurred)
-    obj = make(m.ClientPurchaseOrder, user, **data)
-    for row in rows:
-        row = dict(row)
-        quote = row.get("quote_line")
-        invoice_id = row.pop("invoice_line", None)
-        check(
-            bool(quote) != bool(invoice_id),
-            "Select exactly one quotation line or approved invoice line.",
-        )
-        if quote:
-            same_request(request, quote.item.request)
-            check(
-                quote.revision.issues.filter(occurred_at__lte=occurred).exists(),
-                "PO must reference a quotation sent before receipt.",
-            )
-            check(
-                not quote.revision.expires_at or occurred <= quote.revision.expires_at,
-                "Quotation expired; reissue first.",
-            )
-            check(
-                row["unit_price"] == quote.unit_price,
-                "Changed PO unit prices require a quotation revision.",
-            )
-            item, description, origin = quote.item, quote.description, "QUOTATION"
-        else:
-            from ledger.models import ProcurementInvoiceLine, SalesInvoiceItem
-
-            invoice = (
-                ProcurementInvoiceLine.objects.select_related("link__transaction")
-                .filter(
-                    pk=invoice_id,
-                    link__request=request,
-                    link__transaction__reversal__isnull=True,
-                )
-                .first()
-            )
-            modern = False
-            if invoice is None:
-                invoice = (
-                    SalesInvoiceItem.objects.select_related("invoice", "source_item")
-                    .filter(
-                        pk=invoice_id,
-                        invoice__finance_request__request=request,
-                        invoice__confirmed_revision__isnull=False,
-                        invoice__posted_transaction__isnull=True,
-                    )
-                    .first()
-                )
-                modern = invoice is not None
-            check(
-                invoice is not None, "Select an active invoice line for this request."
-            )
-            check(
-                invoice.po_line_id is None,
-                "This invoice line already has a purchase order.",
-            )
-            check(
-                row["quantity"] == invoice.quantity
-                and (row["unit_price"] * row["quantity"]).quantize(
-                    Decimal(".01"), rounding=ROUND_HALF_UP
-                )
-                == invoice.amount,
-                "Purchase order must match the invoice quantity and goods value.",
-            )
-            item, description, origin = (
-                invoice.source_item if modern else invoice.item,
-                invoice.description if modern else invoice.item.description,
-                "INVOICE",
-            )
-        line = make(
-            m.ClientPurchaseOrderLine,
-            user,
-            order=obj,
+    try:
+        return m.RequestedItemImage.objects.create(
+            id=document_id,
             item=item,
-            item_description=description,
-            origin=origin,
-            **row,
+            position=position,
+            caption=caption,
+            filename=filename,
+            mime_type=mime,
+            size_bytes=uploaded.size,
+            checksum=checksum,
+            storage_provider=stored.provider,
+            external_file_id=stored.external_file_id,
+            storage_path=stored.storage_path,
+            created_by=user,
+            created_by_name=actor_name(user),
         )
-        if invoice_id:
-            invoice.po_line = line
-            invoice.save(update_fields=["po_line"])
-        attempt = make(
-            m.FulfilmentAttempt,
-            user,
-            item=item,
-            po_line=line,
-            quantity=line.quantity,
-            strategy="ORIGINAL",
+    except Exception:
+        storage.delete(
+            external_file_id=stored.external_file_id, storage_path=stored.storage_path
         )
-        event(
-            item,
-            "PURCHASE_ORDER_RECEIVED",
-            user,
-            quantity=line.quantity,
-            po_line=line,
-            attempt=attempt,
-            occurred_at=occurred,
-        )
-    return obj
+        raise
 
 
-@transaction.atomic
-def create_purchase(user, data):
-    data = dict(data)
-    request = lock_request(data["request"], user)
-    rows = data.pop("lines")
-    validate_party(data["supplier"], "SUPPLIER")
-    document(request, data.get("document"))
-    obj = make(m.SupplierPurchase, user, supplier_name=str(data["supplier"]), **data)
-    for row in rows:
-        attempt, offer = row["attempt"], row["supplier_offer"]
-        same_request(request, attempt.item.request)
-        check(
-            offer.item_id == attempt.item_id
-            and offer.quotation.supplier_id == obj.supplier_id,
-            "Offer must match the item and purchasing supplier.",
-        )
-        check(
-            not offer.attempt_id or offer.attempt_id == attempt.id,
-            "Offer belongs to another fulfilment attempt.",
-        )
-        check(
-            offer.quotation.currency == obj.currency,
-            "Offer and purchase currencies must match.",
-        )
-        check(
-            not offer.quotation.expires_at
-            or offer.quotation.expires_at > timezone.now(),
-            "Supplier offer has expired.",
-        )
-        if attempt.replaces_id:
-            original_supplier = attempt.replaces.delivery_line.receipt_line.purchase_line.purchase.supplier_id
-            if attempt.strategy == "SAME_SUPPLIER":
-                check(
-                    obj.supplier_id == original_supplier,
-                    "Use the original supplier for a supplier replacement.",
-                )
-            else:
-                check(
-                    obj.supplier_id != original_supplier,
-                    "Select a different supplier for this replacement attempt.",
-                )
-        check(
-            total(attempt.purchase_lines.all()) + row["quantity"] <= attempt.quantity,
-            "Purchase exceeds the remaining attempt quantity.",
-        )
-        line = make(m.SupplierPurchaseLine, user, purchase=obj, **row)
-        event(
-            attempt.item,
-            "ITEM_PURCHASED",
-            user,
-            quantity=line.quantity,
-            attempt=attempt,
-            purchase_line=line,
-        )
-    return obj
-
-
-@transaction.atomic
-def create_receipt(user, data):
-    data = dict(data)
-    request = lock_request(data["purchase"].request, user)
-    rows = data.pop("lines")
-    document(request, data.get("document"))
-    not_future(data.get("received_at", timezone.now()))
-    obj = make(m.GoodsReceipt, user, **data)
-    for row in rows:
-        purchase_line = row["purchase_line"]
-        check(
-            purchase_line.purchase_id == obj.purchase_id,
-            "Receipt line belongs to another purchase.",
-        )
-        check(
-            obj.received_at >= purchase_line.created_at,
-            "Receipt cannot precede the recorded purchase.",
-        )
-        check(
-            total(purchase_line.receipts.all()) + row["quantity"]
-            <= purchase_line.quantity,
-            "Receipt exceeds purchased quantity.",
-        )
-        line = make(m.GoodsReceiptLine, user, receipt=obj, **row)
-        event(
-            purchase_line.attempt.item,
-            "ITEM_PURCHASED_AND_RECEIVED",
-            user,
-            quantity=line.quantity,
-            attempt=purchase_line.attempt,
-            purchase_line=purchase_line,
-            receipt_line=line,
-            occurred_at=obj.received_at,
-        )
-    return obj
-
-
-@transaction.atomic
-def create_delivery(user, data):
-    data = dict(data)
-    request = lock_request(data["request"], user)
-    rows = data.pop("lines")
-    contact(request, data["recipient"])
-    document(request, data.get("waybill"), "WAYBILL")
-    obj = make(m.Delivery, user, recipient_name=str(data["recipient"]), **data)
-    for row in rows:
-        receipt = row["receipt_line"]
-        same_request(request, receipt.receipt.purchase.request)
-        check(
-            total(receipt.deliveries.all()) + row["quantity"] <= receipt.quantity,
-            "Delivery exceeds unallocated received quantity (including draft deliveries).",
-        )
-        make(m.DeliveryLine, user, delivery=obj, **row)
-    return obj
-
-
-@transaction.atomic
-def dispatch(user, obj):
-    lock_request(obj.request, user)
-    obj.refresh_from_db()
-    check(obj.dispatched_at is None, "Delivery has already been dispatched.")
-    check(obj.waybill_id, "Generate or attach a waybill before dispatch.")
-    generated = (
-        m.DocumentAsset.objects.filter(document_id=obj.waybill_id)
-        .select_related("version__register")
-        .first()
+def download_image(image):
+    return get_document_storage(image.storage_provider).download(
+        external_file_id=image.external_file_id,
+        storage_path=image.storage_path,
+        filename=image.filename,
+        mime_type=image.mime_type,
     )
-    if generated:
-        check(not generated.draft, "A draft waybill cannot be used for dispatch.")
-        check(
-            generated.format == "PDF",
-            "Use the complete generated PDF for dispatch, not a single JPG page.",
-        )
-        check(
-            generated.version.register.delivery_id == obj.pk,
-            "The generated waybill belongs to another delivery.",
-        )
-    from ledger.models import ProcurementInvoiceLine
-
-    for delivery_line in obj.lines.select_related(
-        "receipt_line__purchase_line__attempt"
-    ):
-        po_line_id = delivery_line.receipt_line.purchase_line.attempt.po_line_id
-        invoices = ProcurementInvoiceLine.objects.filter(po_line_id=po_line_id)
-        if (
-            invoices.exists()
-            and not invoices.filter(link__transaction__reversal__isnull=True).exists()
-        ):
-            raise ValidationError(
-                "The linked invoice was cancelled. Record its replacement before dispatch."
-            )
-    obj.dispatched_at = timezone.now()
-    obj.save(update_fields=["dispatched_at"])
-    for line in obj.lines.all():
-        purchase = line.receipt_line.purchase_line
-        event(
-            purchase.attempt.item,
-            "ITEM_WAYBILLED",
-            user,
-            quantity=line.quantity,
-            attempt=purchase.attempt,
-            delivery_line=line,
-            document=obj.waybill,
-            occurred_at=obj.dispatched_at,
-        )
-    return obj
-
-
-@transaction.atomic
-def record_outcome(user, delivery, data):
-    data = dict(data)
-    request = lock_request(delivery.request, user)
-    delivery.refresh_from_db()
-    check(delivery.dispatched_at, "Dispatch the delivery before recording its outcome.")
-    rows = data.pop("lines")
-    contact(request, data["receiver"])
-    document(request, data.get("signed_waybill"), "SIGNED_WAYBILL")
-    occurred = data.get("occurred_at", timezone.now())
-    not_future(occurred)
-    check(occurred >= delivery.dispatched_at, "Outcome cannot precede dispatch.")
-    obj = make(
-        m.DeliveryOutcome,
-        user,
-        delivery=delivery,
-        receiver_name=str(data["receiver"]),
-        **data,
-    )
-    for row in rows:
-        line = row["delivery_line"]
-        check(
-            line.delivery_id == delivery.id, "Outcome line belongs to another delivery."
-        )
-        accepted, rejected = row["accepted"], row["rejected"]
-        check(accepted + rejected > 0, "Record an accepted or rejected quantity.")
-        check(
-            not accepted or obj.signed_waybill_id,
-            "Accepted items require a signed waybill.",
-        )
-        check(
-            not rejected or row.get("reason", "").strip(),
-            "Rejection reason is mandatory.",
-        )
-        check(
-            total(line.outcomes.all(), "accepted")
-            + total(line.outcomes.all(), "rejected")
-            + accepted
-            + rejected
-            <= line.quantity,
-            "Outcome exceeds dispatched quantity.",
-        )
-        outcome_line = make(m.DeliveryOutcomeLine, user, outcome=obj, **row)
-        attempt = line.receipt_line.purchase_line.attempt
-        for qty, kind in [(accepted, "ITEM_ACCEPTED"), (rejected, "ITEM_REJECTED")]:
-            if qty:
-                event(
-                    attempt.item,
-                    kind,
-                    user,
-                    quantity=qty,
-                    attempt=attempt,
-                    delivery_line=line,
-                    outcome_line=outcome_line,
-                    reason=row.get("reason", ""),
-                    document=obj.signed_waybill,
-                    occurred_at=occurred,
-                )
-    from ledger.procurement_bridge import sync_acceptance
-
-    sync_acceptance(request, user, occurred.astimezone(ZoneInfo("Africa/Lagos")).date())
-    return obj
-
-
-@transaction.atomic
-def resolve_rejection(user, rejection, data):
-    data = dict(data)
-    original = rejection.delivery_line.receipt_line.purchase_line
-    request = lock_request(original.attempt.item.request, user)
-    check(
-        user.has_perm("procurement.resolve_procurementrequest"),
-        "Rejection resolution permission is required.",
-    )
-    check(rejection.rejected > 0, "This outcome has no rejected quantity.")
-    document(request, data.get("document"))
-    kind, qty = data["kind"], data["quantity"]
-    actions = rejection.resolution_actions.all()
-    K = m.RejectionAction.Kind
-    committed = total(rejection.replacement_attempts.all()) + total(
-        actions.filter(kind=K.CLOSE)
-    )
-    if kind in {K.REPLACE, K.SOURCE, K.CLOSE}:
-        check(
-            committed + qty <= rejection.rejected,
-            "Quantity has already been assigned a replacement or closed.",
-        )
-    if kind == K.RETURNED:
-        check(
-            total(actions.filter(kind=K.RETURNED)) + qty <= rejection.rejected,
-            "Returned quantity exceeds rejected quantity.",
-        )
-    if kind in {K.ACCEPTED, K.REFUSED}:
-        check(
-            total(actions.filter(kind__in=[K.ACCEPTED, K.REFUSED])) + qty
-            <= total(actions.filter(kind=K.RETURNED)),
-            "Supplier outcome exceeds quantity returned to supplier.",
-        )
-    if kind == K.REPLACE:
-        check(
-            total(actions.filter(kind=K.REPLACE)) + qty
-            <= total(actions.filter(kind=K.ACCEPTED)),
-            "Record the supplier's acceptance of the returned quantity first.",
-        )
-    check(qty <= rejection.rejected, "Action quantity exceeds rejected quantity.")
-    if kind == K.REFUND:
-        check(
-            data.get("refund_amount") is not None
-            and data["refund_amount"] > 0
-            and data.get("currency")
-            and data.get("document"),
-            "Refund reports require a positive amount, currency and evidence; ledger verification remains pending.",
-        )
-    else:
-        check(
-            data.get("refund_amount") is None and not data.get("currency"),
-            "Refund fields apply only to refund reports.",
-        )
-    replacement = None
-    if kind in {K.REPLACE, K.SOURCE}:
-        replacement = make(
-            m.FulfilmentAttempt,
-            user,
-            item=original.attempt.item,
-            po_line=original.attempt.po_line,
-            quantity=qty,
-            replaces=rejection,
-            strategy="SAME_SUPPLIER" if kind == K.REPLACE else "DIFFERENT_SUPPLIER",
-            reason=data["reason"],
-        )
-    obj = make(
-        m.RejectionAction,
-        user,
-        rejection=rejection,
-        replacement_attempt=replacement,
-        **data,
-    )
-    event(
-        original.attempt.item,
-        kind,
-        user,
-        quantity=qty,
-        reason=data["reason"],
-        rejection_action=obj,
-        outcome_line=rejection,
-        attempt=replacement or original.attempt,
-        document=data.get("document"),
-    )
-    if replacement:
-        event(
-            original.attempt.item,
-            "SOURCING_REOPENED",
-            user,
-            quantity=qty,
-            reason=data["reason"],
-            attempt=replacement,
-            outcome_line=rejection,
-        )
-    return obj
-
-
-@transaction.atomic
-def reorder(user, item, data):
-    request = lock_request(item.request, user)
-    row = {
-        "description": item.description,
-        "specification": item.specification,
-        "unit": item.unit,
-        "quantity": data["quantity"],
-        "required_date": data.get("required_date"),
-    }
-    obj = create_request(
-        user,
-        {
-            "client": request.client,
-            "contact": request.contact,
-            "items": [row],
-            "notes": data["reason"],
-        },
-        previous_item=item,
-    )
-    submit_request(user, obj)
-    new_item = obj.items.get()
-    event(
-        item,
-        "ITEM_REORDERED",
-        user,
-        quantity=data["quantity"],
-        reason=data["reason"],
-        related_item=new_item,
-    )
-    return obj
-
-
-@transaction.atomic
-def create_cost(user, data):
-    request = lock_request(data["item"].request, user)
-    document(request, data["document"])
-    obj = make(m.ProcurementCost, user, **data)
-    event(
-        obj.item,
-        "ACTUAL_COST_RECORDED",
-        user,
-        document=obj.document,
-        reason="Unapproved actual cost; ledger review pending.",
-    )
-    return obj
-
-
-@transaction.atomic
-def create_finance_request(user, data):
-    data = dict(data)
-    request = lock_request(data["request"], user)
-    rows = data.pop("lines")
-    obj = make(m.FinanceRequest, user, **data)
-    for row in rows:
-        same_request(request, row["item"].request)
-        po, delivery = row.get("po_line"), row.get("delivery_line")
-        if po:
-            check(
-                (po.item_id or po.quote_line.item_id) == row["item"].id,
-                "PO line belongs to another item.",
-            )
-        if delivery:
-            purchase = delivery.receipt_line.purchase_line
-            check(
-                purchase.attempt.item_id == row["item"].id,
-                "Delivery belongs to another item.",
-            )
-            check(
-                not po or purchase.attempt.po_line_id == po.id,
-                "Delivery and PO line do not match.",
-            )
-        document(request, row.get("document"))
-        make(m.FinanceRequestLine, user, request=obj, **row)
-        event(
-            row["item"],
-            "FINANCE_REQUEST_DRAFTED",
-            user,
-            reason="Awaiting ledger integration; no official financial record created.",
-        )
-    return obj
-
-
-@transaction.atomic
-def link_task(user, data):
-    from tasks.services.access import can_view_task
-
-    lock_request(data["item"].request, user)
-    check(
-        user.has_perm("tasks.view_task") and can_view_task(user, data["task"]),
-        "Task is not accessible.",
-    )
-    check(
-        not m.ProcurementTaskLink.objects.filter(**data).exists(),
-        "Task is already linked.",
-    )
-    return make(m.ProcurementTaskLink, user, **data)
-
-
-@transaction.atomic
-def expire_revision(revision):
-    # Scheduled command only, never a read-triggered mutation.
-    m.ProcurementRequest.objects.select_for_update().get(
-        pk=revision.quotation.request_id
-    )
-    revision.refresh_from_db()
-    if (
-        not revision.expires_at
-        or revision.expires_at > timezone.now()
-        or revision.expired_recorded_at
-        or not revision.issues.exists()
-    ):
-        return False
-    revision.expired_recorded_at = timezone.now()
-    revision.save(update_fields=["expired_recorded_at"])
-    for line in revision.lines.all():
-        event(
-            line.item,
-            "QUOTATION_EXPIRED",
-            None,
-            quote_revision=revision,
-            occurred_at=revision.expires_at,
-        )
-    return True

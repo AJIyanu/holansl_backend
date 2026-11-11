@@ -176,16 +176,9 @@ def record_operation(actor, invoice, action, key, payload):
 
 
 def lock_invoice(invoice_id):
-    source = SalesInvoice.objects.select_related("finance_request").get(pk=invoice_id)
-    if source.finance_request_id:
-        from procurement.models import ProcurementRequest
-
-        ProcurementRequest.objects.select_for_update().get(
-            pk=source.finance_request.request_id
-        )
     return (
         SalesInvoice.objects.select_for_update(of=("self",))
-        .select_related("party", "confirmed_revision", "finance_request")
+        .select_related("party", "confirmed_revision")
         .get(pk=invoice_id)
     )
 
@@ -196,13 +189,12 @@ def assert_version(invoice, version):
 
 
 @transaction.atomic
-def save_invoice(*, actor, party_id, payload, invoice_id=None, source=None):
+def save_invoice(*, actor, party_id, payload, invoice_id=None):
     access(actor, "change" if invoice_id else "add")
     form = InvoiceInput(data=payload)
     form.is_valid(raise_exception=True)
     canonical = {
         "party_id": str(party_id),
-        "source_id": str(source.pk) if source else None,
         **form.data,
     }
     # Keep historical zero-discount submissions replayable with their old keys.
@@ -229,19 +221,6 @@ def save_invoice(*, actor, party_id, payload, invoice_id=None, source=None):
             raise ValidationError(
                 "Delivered invoices cannot be changed through this action."
             )
-        if invoice.finance_request_id:
-            original = list(invoice.items.all())
-            if len(original) != len(items) or any(
-                str(row.pk) != str(item.get("id"))
-                or row.description != item["description"]
-                or row.quantity != item["quantity"]
-                or row.unit != item["unit"]
-                or row.unit_price != item["unit_price"]
-                for row, item in zip(original, items)
-            ):
-                raise ValidationError(
-                    "Procurement-linked items must retain their source details and ordering."
-                )
         invoice.version += 1
         invoice.confirmed_revision = None
         for name, value in d.items():
@@ -277,22 +256,16 @@ def save_invoice(*, actor, party_id, payload, invoice_id=None, source=None):
     invoice.subtotal = subtotal
     invoice.updated_by = actor
     invoice.save()
-    if not invoice.finance_request_id:
-        old_ids = set(invoice.items.values_list("id", flat=True))
-        if any(item.get("id") and item["id"] not in old_ids for item in items):
-            raise ValidationError("An item belongs to another invoice.")
-        invoice.items.all().delete()
-        SalesInvoiceItem.objects.bulk_create(
-            [
-                SalesInvoiceItem(invoice=invoice, position=i, amount=amount, **item)
-                for i, (item, amount) in enumerate(zip(items, amounts), 1)
-            ]
-        )
-    else:
-        # Preserve procurement identity/quantity/prices while updating net values.
-        for row, amount in zip(original, amounts):
-            row.amount = amount
-            row.save(update_fields=["amount"])
+    old_ids = set(invoice.items.values_list("id", flat=True))
+    if any(item.get("id") and item["id"] not in old_ids for item in items):
+        raise ValidationError("An item belongs to another invoice.")
+    invoice.items.all().delete()
+    SalesInvoiceItem.objects.bulk_create(
+        [
+            SalesInvoiceItem(invoice=invoice, position=i, amount=amount, **item)
+            for i, (item, amount) in enumerate(zip(items, amounts), 1)
+        ]
+    )
     record_operation(actor, invoice, "EDIT" if invoice_id else "CREATE", key, canonical)
     return invoice
 
@@ -305,18 +278,9 @@ def assign_reference(invoice):
         )
     code = InvoiceClientCode.objects.filter(party=invoice.party).first()
     if not code:
-        from procurement.models import ClientDocumentCode
-
-        existing = ClientDocumentCode.objects.filter(client=invoice.party).first()
-        preferred = (
-            existing.code
-            if existing and len(existing.code) == 3
-            else "".join(
-                c
-                for c in invoice.party.display_name.upper()
-                if c in string.ascii_uppercase
-            )[:3].ljust(3, "X")
-        )
+        preferred = "".join(
+            c for c in invoice.party.display_name.upper() if c in string.ascii_uppercase
+        )[:3].ljust(3, "X")
         occupied = set(InvoiceClientCode.objects.values_list("code", flat=True))
         candidate = preferred
         if candidate in occupied:
@@ -350,7 +314,7 @@ def document_snapshot(invoice):
         "billed_to": invoice.billed_to,
         "billing_address": invoice.billing_address,
         "notes": invoice.notes,
-        "company": dict(settings.PROCUREMENT_DOCUMENT_COMPANY),
+        "company": dict(settings.LEDGER_DOCUMENT_COMPANY),
         "version": invoice.version,
         "vat_rate": str(invoice.tax_rate),
         "delivery_status": "Delivered" if invoice.delivered_at else "Not delivered",
@@ -444,33 +408,15 @@ def invoice_action(*, actor, invoice_id, action, payload):
 
         delivery_tax(invoice, "sales")
         invoice.version += 1
-        if invoice.finance_request_id:
-            from .models import ProcurementLedgerLink, ProcurementInvoiceLine
-            from .procurement_bridge import sync_acceptance
-
-            source = invoice.finance_request
-            link = ProcurementLedgerLink.objects.create(
-                transaction=posted, finance_request=source, request=source.request
-            )
-            for item in invoice.items.all():
-                ProcurementInvoiceLine.objects.create(
-                    link=link,
-                    item=item.source_item,
-                    po_line=item.po_line,
-                    quantity=item.quantity,
-                    amount=item.amount,
-                )
-            sync_acceptance(source.request, actor, delivered)
-        else:
-            InvoiceFulfilment.objects.create(
-                invoice=posted,
-                request_key=d["request_key"],
-                status="DISPATCHED",
-                date=delivered,
-                amount=invoice.subtotal,
-                evidence=f"Delivery confirmed for {invoice.reference}",
-                actor=actor,
-            )
+        InvoiceFulfilment.objects.create(
+            invoice=posted,
+            request_key=d["request_key"],
+            status="DISPATCHED",
+            date=delivered,
+            amount=invoice.subtotal,
+            evidence=f"Delivery confirmed for {invoice.reference}",
+            actor=actor,
+        )
         freeze(invoice, actor)
     record_operation(actor, invoice, action, d["request_key"], canonical)
     return invoice
