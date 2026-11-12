@@ -58,10 +58,6 @@ class ItemRequest(Record):
         "crm.Party", on_delete=models.PROTECT, related_name="item_requests"
     )
     client_name = models.CharField(max_length=255)
-    requester = models.ForeignKey(
-        "crm.Party", null=True, blank=True, on_delete=models.PROTECT, related_name="+"
-    )
-    requester_name = models.CharField(max_length=255, blank=True)
     received_via = models.CharField(
         max_length=20, choices=ReceivedVia.choices, blank=True
     )

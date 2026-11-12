@@ -12,7 +12,7 @@ from crm.document_services import (
     calculate_document_checksum,
     sanitize_document_filename,
 )
-from crm.models import Party, PartyAffiliation
+from crm.models import Party
 from crm.storage import get_document_storage
 from . import models as m
 
@@ -37,6 +37,16 @@ STATUS_TITLES = {
     "DELIVERED": "Item delivered",
     "CLOSED": "Item closed",
 }
+EDITABLE_ITEM_FIELDS = {
+    "name": "item name",
+    "description": "description",
+    "specification": "specification",
+    "brand": "brand",
+    "quantity": "quantity",
+    "unit": "unit",
+    "urgency": "urgency",
+    "deadline": "deadline",
+}
 
 
 def actor_name(user):
@@ -46,19 +56,6 @@ def actor_name(user):
 def ensure_client(party):
     if not Party.objects.active().with_role("CLIENT").filter(pk=party.pk).exists():
         raise ValidationError({"client": "Choose an active CRM client."})
-
-
-def ensure_requester(client, requester):
-    if requester is None or requester.pk == client.pk:
-        return
-    if not PartyAffiliation.objects.filter(
-        organisation=client, person=requester, is_current=True
-    ).exists():
-        raise ValidationError(
-            {
-                "requester": "Choose the client or a current contact affiliated with the client."
-            }
-        )
 
 
 def client_code(user, client):
@@ -119,16 +116,14 @@ def allocate_codes(user, client, count, registered_at):
 @transaction.atomic
 def create_request(user, data):
     items = data.pop("items")
-    client, requester = data["client"], data.get("requester")
+    client = data["client"]
     ensure_client(client)
-    ensure_requester(client, requester)
     now = timezone.now()
     codes = allocate_codes(user, client, len(items), now)
     name = actor_name(user)
     request = m.ItemRequest.objects.create(
         **data,
         client_name=client.display_name,
-        requester_name=requester.display_name if requester else client.display_name,
         created_by=user,
         created_by_name=name,
     )
@@ -179,6 +174,50 @@ def add_activity(user, item, data):
     )
 
 
+def _history_value(value):
+    if value is None:
+        return None
+    return str(value)
+
+
+@transaction.atomic
+def edit_item(user, item, data):
+    item = m.RequestedItem.objects.select_for_update().get(pk=item.pk)
+    if item.status in {"DELIVERED", "CLOSED"}:
+        raise ValidationError("Delivered or closed items cannot be edited.")
+    changes = {}
+    for field, value in data.items():
+        previous = getattr(item, field)
+        if previous == value:
+            continue
+        changes[field] = {
+            "label": EDITABLE_ITEM_FIELDS[field],
+            "from": _history_value(previous),
+            "to": _history_value(value),
+        }
+        setattr(item, field, value)
+    if not changes:
+        raise ValidationError("No item details changed.")
+    item.save(update_fields=[*changes, "updated_at"])
+    labels = [change["label"] for change in changes.values()]
+    if len(labels) == 1:
+        summary = labels[0]
+    else:
+        summary = f"{', '.join(labels[:-1])} and {labels[-1]}"
+    name = actor_name(user)
+    m.ItemActivity.objects.create(
+        item=item,
+        category="SYSTEM",
+        title_code="ITEM_UPDATED",
+        title="Item details updated",
+        description=f"{name} updated the {summary}.",
+        metadata={"changes": changes},
+        created_by=user,
+        created_by_name=name,
+    )
+    return item
+
+
 @transaction.atomic
 def change_status(user, item, data):
     item = m.RequestedItem.objects.select_for_update().get(pk=item.pk)
@@ -214,56 +253,134 @@ def change_status(user, item, data):
     return item
 
 
+def _picture_description(name, verb, count):
+    pictures = "a picture sample" if count == 1 else f"{count} picture samples"
+    return f"{name} {verb} {pictures}."
+
+
 @transaction.atomic
-def upload_image(user, item, uploaded, caption=""):
+def upload_images(user, item, uploads, caption=""):
     item = (
         m.RequestedItem.objects.select_for_update()
         .select_related("request")
         .get(pk=item.pk)
     )
-    if item.images.count() >= 10:
-        raise ValidationError({"file": "An item can have at most 10 sample images."})
-    if uploaded.size > 10 * 1024 * 1024:
-        raise ValidationError({"file": "Each image must be 10 MB or smaller."})
-    mime = (uploaded.content_type or "").lower()
-    if mime not in {"image/jpeg", "image/png", "image/webp"}:
-        raise ValidationError({"file": "Upload a JPEG, PNG or WebP image."})
-    filename = sanitize_document_filename(uploaded.name)
-    checksum = calculate_document_checksum(uploaded)
-    document_id = uuid.uuid4()
-    position = (item.images.aggregate(value=Max("position"))["value"] or -1) + 1
+    if item.status in {"DELIVERED", "CLOSED"}:
+        raise ValidationError("Delivered or closed items cannot change pictures.")
+    uploads = list(uploads)
+    if not uploads:
+        raise ValidationError({"files": "Choose at least one picture sample."})
+    if item.images.count() + len(uploads) > 5:
+        raise ValidationError({"files": "An item can have at most 5 picture samples."})
+    for uploaded in uploads:
+        if uploaded.size > 5 * 1024 * 1024:
+            raise ValidationError({"files": "Each picture must be 5 MB or smaller."})
+        if (uploaded.content_type or "").lower() not in {
+            "image/jpeg",
+            "image/png",
+            "image/webp",
+        }:
+            raise ValidationError({"files": "Upload JPEG, PNG or WebP pictures."})
     storage = get_document_storage("supabase")
-    uploaded.seek(0)
-    stored = storage.upload(
-        document_id=document_id,
-        party_id=item.request.client_id,
-        category=f"PROCUREMENT/ITEM_REQUESTS/{item.code}",
-        filename=filename,
-        mime_type=mime,
-        size_bytes=uploaded.size,
-        file_object=uploaded.file,
-    )
+    last_position = item.images.aggregate(value=Max("position"))["value"]
+    position = last_position + 1 if last_position is not None else 0
+    created = []
+    stored_files = []
     try:
-        return m.RequestedItemImage.objects.create(
-            id=document_id,
+        for offset, uploaded in enumerate(uploads):
+            filename = sanitize_document_filename(uploaded.name)
+            mime = (uploaded.content_type or "").lower()
+            checksum = calculate_document_checksum(uploaded)
+            document_id = uuid.uuid4()
+            uploaded.seek(0)
+            stored = storage.upload(
+                document_id=document_id,
+                party_id=item.request.client_id,
+                category=f"PROCUREMENT/ITEM_REQUESTS/{item.code}",
+                filename=filename,
+                mime_type=mime,
+                size_bytes=uploaded.size,
+                file_object=uploaded.file,
+            )
+            stored_files.append(stored)
+            created.append(
+                m.RequestedItemImage.objects.create(
+                    id=document_id,
+                    item=item,
+                    position=position + offset,
+                    caption=caption,
+                    filename=filename,
+                    mime_type=mime,
+                    size_bytes=uploaded.size,
+                    checksum=checksum,
+                    storage_provider=stored.provider,
+                    external_file_id=stored.external_file_id,
+                    storage_path=stored.storage_path,
+                    created_by=user,
+                    created_by_name=actor_name(user),
+                )
+            )
+        name = actor_name(user)
+        m.ItemActivity.objects.create(
             item=item,
-            position=position,
-            caption=caption,
-            filename=filename,
-            mime_type=mime,
-            size_bytes=uploaded.size,
-            checksum=checksum,
-            storage_provider=stored.provider,
-            external_file_id=stored.external_file_id,
-            storage_path=stored.storage_path,
+            category="SYSTEM",
+            title_code="PICTURES_ADDED",
+            title="Picture samples added",
+            description=_picture_description(name, "added", len(created)),
+            metadata={
+                "pictures": [
+                    {"id": str(image.id), "filename": image.filename}
+                    for image in created
+                ]
+            },
             created_by=user,
-            created_by_name=actor_name(user),
+            created_by_name=name,
         )
+        return created
     except Exception:
-        storage.delete(
-            external_file_id=stored.external_file_id, storage_path=stored.storage_path
-        )
+        for stored in stored_files:
+            storage.delete(
+                external_file_id=stored.external_file_id,
+                storage_path=stored.storage_path,
+            )
         raise
+
+
+@transaction.atomic
+def remove_images(user, item, image_ids):
+    item = m.RequestedItem.objects.select_for_update().get(pk=item.pk)
+    if item.status in {"DELIVERED", "CLOSED"}:
+        raise ValidationError("Delivered or closed items cannot change pictures.")
+    images = list(
+        m.RequestedItemImage.objects.select_for_update()
+        .filter(item=item, id__in=image_ids)
+        .order_by("position")
+    )
+    if len(images) != len(set(image_ids)):
+        raise ValidationError({"images": "Choose existing pictures for this item."})
+    for image in images:
+        get_document_storage(image.storage_provider).delete(
+            external_file_id=image.external_file_id,
+            storage_path=image.storage_path,
+        )
+    details = [{"id": str(image.id), "filename": image.filename} for image in images]
+    m.RequestedItemImage.objects.filter(id__in=image_ids).delete()
+    for position, image in enumerate(item.images.order_by("position", "created_at")):
+        if image.position != position:
+            image.position = position
+            image.save(update_fields=["position"])
+    name = actor_name(user)
+    m.ItemActivity.objects.create(
+        item=item,
+        category="SYSTEM",
+        title_code="PICTURES_REMOVED",
+        title="Picture samples removed",
+        description=_picture_description(name, "removed", len(images)),
+        metadata={"pictures": details},
+        created_by=user,
+        created_by_name=name,
+    )
+    return images
 
 
 def download_image(image):

@@ -18,7 +18,6 @@ class ItemRequestFilter(django_filters.FilterSet):
     def filter_search(self, queryset, name, value):
         return queryset.filter(
             Q(client_name__icontains=value)
-            | Q(requester_name__icontains=value)
             | Q(items__name__icontains=value)
             | Q(items__code__icontains=value)
         ).distinct()
@@ -31,7 +30,6 @@ class ItemRequestFilter(django_filters.FilterSet):
 class RequestedItemFilter(django_filters.FilterSet):
     search = django_filters.CharFilter(method="filter_search")
     client = django_filters.UUIDFilter(field_name="request__client_id")
-    requester = django_filters.UUIDFilter(field_name="request__requester_id")
     received_via = django_filters.CharFilter(field_name="request__received_via")
     urgency = django_filters.CharFilter()
     status = django_filters.CharFilter()
@@ -55,7 +53,6 @@ class RequestedItemFilter(django_filters.FilterSet):
             | Q(description__icontains=value)
             | Q(brand__icontains=value)
             | Q(request__client_name__icontains=value)
-            | Q(request__requester_name__icontains=value)
         )
 
     def filter_images(self, queryset, name, value):
@@ -79,4 +76,4 @@ class RequestedItemFilter(django_filters.FilterSet):
 
     class Meta:
         model = RequestedItem
-        fields = ["client", "requester", "received_via", "urgency", "status"]
+        fields = ["client", "received_via", "urgency", "status"]

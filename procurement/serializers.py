@@ -23,9 +23,6 @@ class ItemInput(serializers.Serializer):
 
 class ItemRequestInput(serializers.Serializer):
     client = serializers.PrimaryKeyRelatedField(queryset=Party.objects.all())
-    requester = serializers.PrimaryKeyRelatedField(
-        queryset=Party.objects.all(), required=False, allow_null=True
-    )
     received_via = serializers.ChoiceField(
         choices=m.ItemRequest.ReceivedVia.choices, required=False, allow_blank=True
     )
@@ -82,9 +79,6 @@ class ActivitySerializer(serializers.ModelSerializer):
 
 class RequestedItemSerializer(serializers.ModelSerializer):
     client_name = serializers.CharField(source="request.client_name", read_only=True)
-    requester_name = serializers.CharField(
-        source="request.requester_name", read_only=True
-    )
     received_via = serializers.CharField(source="request.received_via", read_only=True)
     received_via_custom = serializers.CharField(
         source="request.received_via_custom", read_only=True
@@ -117,7 +111,6 @@ class RequestedItemSerializer(serializers.ModelSerializer):
             "status",
             "completed_at",
             "client_name",
-            "requester_name",
             "received_via",
             "received_via_custom",
             "received_at",
@@ -139,8 +132,6 @@ class ItemRequestSerializer(serializers.ModelSerializer):
             "id",
             "client",
             "client_name",
-            "requester",
-            "requester_name",
             "received_via",
             "received_via_custom",
             "notes",
@@ -169,6 +160,42 @@ class StatusInput(serializers.Serializer):
     occurred_at = serializers.DateTimeField(required=False)
 
 
-class ImageInput(serializers.Serializer):
-    file = serializers.ImageField()
+class ItemEditInput(serializers.Serializer):
+    name = serializers.CharField(max_length=255, required=False)
+    description = serializers.CharField(required=False)
+    specification = serializers.CharField(required=False, allow_blank=True)
+    brand = serializers.CharField(max_length=255, required=False, allow_blank=True)
+    quantity = serializers.DecimalField(
+        max_digits=18,
+        decimal_places=4,
+        min_value=Decimal("0.0001"),
+        required=False,
+    )
+    unit = serializers.CharField(max_length=80, required=False)
+    urgency = serializers.ChoiceField(
+        choices=m.RequestedItem.Urgency.choices, required=False
+    )
+    deadline = serializers.DateField(required=False, allow_null=True)
+
+    def validate(self, attrs):
+        if not attrs:
+            raise serializers.ValidationError("Submit at least one item field.")
+        return attrs
+
+
+class ImagesInput(serializers.Serializer):
+    files = serializers.ListField(
+        child=serializers.ImageField(), min_length=1, max_length=5
+    )
     caption = serializers.CharField(max_length=255, required=False, allow_blank=True)
+
+
+class ImageDeleteInput(serializers.Serializer):
+    images = serializers.ListField(
+        child=serializers.UUIDField(), min_length=1, max_length=5
+    )
+
+    def validate_images(self, value):
+        if len(value) != len(set(value)):
+            raise serializers.ValidationError("Choose each picture only once.")
+        return value
