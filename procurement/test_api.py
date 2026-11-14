@@ -1,5 +1,6 @@
 import base64
 import json
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
@@ -11,7 +12,7 @@ from rest_framework import status
 from rest_framework.test import APIClient, APITestCase
 
 from crm.models import Party, PartyRole
-from crm.storage.base import StoredDocument
+from crm.storage.base import DownloadedDocument, StoredDocument
 from . import analytics
 from .models import ItemActivity, ItemRequest, RequestedItem
 
@@ -38,6 +39,28 @@ class ProcurementItemRequestTests(APITestCase):
                 "change_requesteditem",
                 "add_requesteditemimage",
                 "delete_requesteditemimage",
+                "add_supplierquote",
+                "view_supplierquote",
+                "download_supplierquote",
+                "add_clientquotation",
+                "view_clientquotation",
+                "issue_clientquotation",
+                "communicate_clientquotation",
+                "change_clientquotation",
+                "revise_clientquotation",
+                "remove_clientquotation",
+                "add_purchaseorder",
+                "view_purchaseorder",
+                "change_purchaseorderstatus",
+                "download_purchaseorder",
+                "add_purchase",
+                "view_purchase",
+                "change_purchaseitemstatus",
+                "add_waybill",
+                "view_waybill",
+                "communicate_waybill",
+                "add_itemverdict",
+                "view_itemverdict",
             ],
         )
         self.user.user_permissions.add(*permissions)
@@ -51,6 +74,13 @@ class ProcurementItemRequestTests(APITestCase):
             party=self.crm_client,
             role=PartyRole.Role.CLIENT,
             is_active=True,
+        )
+        self.supplier = Party.objects.create(
+            display_name="Trusted Supplier Limited",
+            entity_kind=Party.EntityKind.ORGANISATION,
+        )
+        PartyRole.objects.create(
+            party=self.supplier, role=PartyRole.Role.SUPPLIER, is_active=True
         )
 
     def request_payload(self):
@@ -90,6 +120,233 @@ class ProcurementItemRequestTests(APITestCase):
             activity = item.activities.get()
             self.assertEqual(activity.title_code, "REQUEST_RECEIVED")
             self.assertEqual(activity.status_result, RequestedItem.Status.OPEN)
+
+    def test_supplier_quote_multipart_items_and_empty_expiry(self):
+        created = self.client.post(
+            reverse("item-request-list"), self.request_payload(), format="json"
+        )
+        response = self.client.post(
+            reverse("supplier-quote-list"),
+            {
+                "supplier": str(self.supplier.pk),
+                "received_via": "EMAIL",
+                "quotation_date": "2026-11-13",
+                "expires_on": "",
+                "items": json.dumps(
+                    [
+                        {"item": row["id"], "quantity": "1", "unit_price": "25000"}
+                        for row in created.data["items"]
+                    ]
+                ),
+            },
+            format="multipart",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        self.assertEqual(len(response.data["items"]), 2)
+        self.assertIsNone(response.data["expires_on"])
+
+    def test_client_quotation_accepts_other_clients_items_without_discount(self):
+        created = self.client.post(
+            reverse("item-request-list"), self.request_payload(), format="json"
+        )
+        other = Party.objects.create(
+            display_name="Other client", entity_kind=Party.EntityKind.ORGANISATION
+        )
+        PartyRole.objects.create(
+            party=other, role=PartyRole.Role.CLIENT, is_active=True
+        )
+        response = self.client.post(
+            reverse("client-quotation-list"),
+            {
+                "client": str(other.pk),
+                "quotation_date": "2026-11-13",
+                "expires_on": "2026-11-30",
+                "items": [
+                    {
+                        "item": row["id"],
+                        "description": row["name"],
+                        "quantity": "1",
+                        "unit_price": "1000",
+                    }
+                    for row in created.data["items"]
+                ],
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        self.assertEqual(str(response.data["client"]), str(other.pk))
+        self.assertEqual(len(response.data["items"]), 2)
+        self.assertEqual(
+            ItemRequest.objects.get(pk=created.data["id"]).client_id, self.crm_client.pk
+        )
+
+    def test_supplier_quote_links_each_item_activity(self):
+        created = self.client.post(
+            reverse("item-request-list"), self.request_payload(), format="json"
+        )
+        item_ids = [row["id"] for row in created.data["items"]]
+        response = self.client.post(
+            reverse("supplier-quote-list"),
+            {
+                "supplier": str(self.supplier.pk),
+                "received_via": "EMAIL",
+                "items": [
+                    {
+                        "item": item_id,
+                        "quantity": "1",
+                        "unit_price": "25000",
+                        "tax_enabled": True,
+                    }
+                    for item_id in item_ids
+                ],
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(len(response.data["items"]), 2)
+        for item_id in item_ids:
+            activity = ItemActivity.objects.get(
+                item_id=item_id, title_code="SUPPLIER_QUOTE_ADDED"
+            )
+            self.assertEqual(activity.metadata["quote_id"], str(response.data["id"]))
+            self.assertEqual(activity.created_by, self.user)
+
+    def test_client_quotation_combines_items_and_allocates_daily_reference(self):
+        created = self.client.post(
+            reverse("item-request-list"), self.request_payload(), format="json"
+        )
+        payload = {
+            "client": str(self.crm_client.pk),
+            "quotation_date": "2026-11-13",
+            "expires_on": "2026-11-30",
+            "currency": "NGN",
+            "tax_enabled": True,
+            "tax_rate": "7.50",
+            "discount_type": "PERCENT",
+            "discount_value": "5",
+            "items": [
+                {
+                    "item": row["id"],
+                    "description": row["name"],
+                    "quantity": row["quantity"],
+                    "unit_price": "10000",
+                }
+                for row in created.data["items"]
+            ],
+        }
+        first = self.client.post(
+            reverse("client-quotation-list"), payload, format="json"
+        )
+        second = self.client.post(
+            reverse("client-quotation-list"), payload, format="json"
+        )
+        self.assertEqual(first.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(first.data["reference"], "HOL-QTN-261113-01")
+        self.assertEqual(second.data["reference"], "HOL-QTN-261113-02")
+        with patch(
+            "procurement.services.get_document_storage",
+            return_value=(storage := FakePictureStorage()),
+        ):
+            issued = self.client.post(
+                reverse("client-quotation-issue", args=[first.data["reference"]]),
+                {},
+                format="json",
+            )
+            downloaded = self.client.get(
+                reverse("client-quotation-download", args=[first.data["reference"]])
+            )
+            printed = self.client.get(
+                reverse(
+                    "client-quotation-print-document", args=[first.data["reference"]]
+                )
+            )
+            with patch(
+                "procurement.services.send_document_email",
+                return_value=SimpleNamespace(provider_message_id="provider-1"),
+            ):
+                emailed = self.client.post(
+                    reverse("client-quotation-email", args=[first.data["reference"]]),
+                    {
+                        "request_key": "64c24cc0-a946-4c94-bdeb-b69ff4dbde50",
+                        "destination": "procurement@acme.test",
+                        "subject": "Quotation",
+                        "message": "Please find the quotation attached.",
+                    },
+                    format="json",
+                )
+            revised_payload = {
+                **payload,
+                "items": [dict(row) for row in payload["items"]],
+            }
+            revised_payload["items"][0]["unit_price"] = "12000"
+            revised = self.client.patch(
+                reverse("client-quotation-detail", args=[first.data["reference"]]),
+                revised_payload,
+                format="json",
+            )
+            reissued = self.client.post(
+                reverse("client-quotation-issue", args=[first.data["reference"]]),
+                {},
+                format="json",
+            )
+            removed = self.client.post(
+                reverse(
+                    "client-quotation-remove-document",
+                    args=[first.data["reference"]],
+                ),
+                {},
+                format="json",
+            )
+        self.assertEqual(issued.status_code, status.HTTP_200_OK)
+        self.assertEqual(issued.data["status"], "ISSUED")
+        self.assertTrue(issued.data["document_available"])
+        self.assertEqual(downloaded.status_code, status.HTTP_200_OK)
+        self.assertEqual(printed.status_code, status.HTTP_200_OK)
+        self.assertEqual(emailed.status_code, status.HTTP_200_OK)
+        self.assertEqual(revised.status_code, status.HTTP_200_OK, revised.data)
+        self.assertEqual(revised.data["version"], 2)
+        self.assertEqual(revised.data["status"], "DRAFT")
+        self.assertEqual(reissued.status_code, status.HTTP_200_OK, reissued.data)
+        self.assertEqual(len(reissued.data["revisions"]), 2)
+        self.assertEqual(removed.status_code, status.HTTP_200_OK, removed.data)
+        self.assertFalse(removed.data["document_available"])
+        self.assertEqual(
+            removed.data["revisions"][0]["removed_by_name"], self.user.email
+        )
+        self.assertTrue(storage.content.startswith(b"%PDF"))
+        for row in created.data["items"]:
+            self.assertTrue(
+                ItemActivity.objects.filter(
+                    item_id=row["id"], title_code="CLIENT_QUOTATION_ISSUED"
+                ).exists()
+            )
+            activities = ItemActivity.objects.filter(item_id=row["id"])
+            self.assertTrue(
+                activities.filter(title_code="CLIENT_QUOTATION_DOWNLOAD").exists()
+            )
+            self.assertTrue(
+                activities.filter(title_code="CLIENT_QUOTATION_PRINT").exists()
+            )
+            self.assertTrue(
+                activities.filter(title_code="CLIENT_QUOTATION_EMAIL").exists()
+            )
+            self.assertTrue(
+                activities.filter(title_code="CLIENT_QUOTATION_REVISED").exists()
+            )
+            self.assertTrue(
+                activities.filter(
+                    title_code="CLIENT_QUOTATION_DOCUMENT_REMOVED"
+                ).exists()
+            )
+            issue_description = (
+                activities.filter(title_code="CLIENT_QUOTATION_ISSUED")
+                .order_by("occurred_at")
+                .first()
+                .description
+            )
+            self.assertIn("subtotal", issue_description)
+            self.assertIn("VAT 7.5%", issue_description)
+            self.assertIn("Draft to Issued", issue_description)
 
     def test_daily_sequence_continues_across_request_batches(self):
         first = self.client.post(
@@ -373,6 +630,242 @@ class ProcurementItemRequestTests(APITestCase):
         self.assertFalse(first.data["cache"]["hit"])
         self.assertTrue(second.data["cache"]["hit"])
 
+    def test_purchase_order_accepts_any_tracked_item_and_records_activity(self):
+        created = self.client.post(
+            reverse("item-request-list"), self.request_payload(), format="json"
+        )
+        response = self.client.post(
+            reverse("purchase-order-list"),
+            {
+                "client": str(self.crm_client.pk),
+                "client_reference": "CLIENT-PO-44",
+                "urgency": "URGENT",
+                "items": [
+                    {
+                        "item": created.data["items"][0]["id"],
+                        "quantity": "5",
+                        "unit_price": "12500",
+                    }
+                ],
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        self.assertRegex(response.data["reference"], r"^HOL-PO-\d{6}-01$")
+        self.assertEqual(response.data["status"], "QUEUED")
+        self.assertTrue(
+            ItemActivity.objects.filter(
+                item_id=created.data["items"][0]["id"],
+                title_code="PURCHASE_ORDER_RECEIVED",
+            ).exists()
+        )
+
+    def test_purchase_order_document_is_limited_to_five_mb(self):
+        created = self.client.post(
+            reverse("item-request-list"), self.request_payload(), format="json"
+        )
+        with patch(
+            "procurement.services.get_document_storage",
+            return_value=FakePictureStorage(),
+        ):
+            response = self.client.post(
+                reverse("purchase-order-list"),
+                {
+                    "client": str(self.crm_client.pk),
+                    "client_reference": "CLIENT-PO-LARGE",
+                    "items": json.dumps(
+                        [{"item": created.data["items"][0]["id"], "quantity": "1"}]
+                    ),
+                    "attachment": picture_file("po.png", 5 * 1024 * 1024 + 1),
+                },
+                format="multipart",
+            )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("5 MB", str(response.data))
+
+    def test_po_reason_is_optional_and_purchase_item_status_is_recorded(self):
+        created = self.client.post(
+            reverse("item-request-list"), self.request_payload(), format="json"
+        )
+        item = created.data["items"][0]
+        po = self.client.post(
+            reverse("purchase-order-list"),
+            {
+                "client": str(self.crm_client.pk),
+                "client_reference": "CLIENT-PO-STATUS",
+                "items": [{"item": item["id"], "quantity": "1"}],
+            },
+            format="json",
+        )
+        changed = self.client.post(
+            reverse("purchase-order-status", args=[po.data["id"]]),
+            {"status": "ACTIVE", "reason": ""},
+            format="json",
+        )
+        self.assertEqual(changed.status_code, status.HTTP_200_OK, changed.data)
+        purchase = self.client.post(
+            reverse("purchase-list"),
+            {
+                "purchased_from": str(self.supplier.pk),
+                "items": [{"item": item["id"], "quantity": "1", "unit_price": "500"}],
+            },
+            format="json",
+        )
+        line = purchase.data["items"][0]
+        self.assertEqual(line["status"], "PAID")
+        updated = self.client.post(
+            reverse("purchase-item-status", args=[purchase.data["id"], line["id"]]),
+            {"status": "TRANSIT", "reason": ""},
+            format="json",
+        )
+        self.assertEqual(updated.status_code, status.HTTP_200_OK, updated.data)
+        self.assertEqual(updated.data["status"], "TRANSIT")
+
+    def test_waybill_is_stored_and_verdicts_are_limited_by_waybilled_quantity(self):
+        created = self.client.post(
+            reverse("item-request-list"), self.request_payload(), format="json"
+        )
+        with patch(
+            "procurement.services.get_document_storage",
+            return_value=FakePictureStorage(),
+        ):
+            waybill = self.client.post(
+                reverse("waybill-list"),
+                {
+                    "client": str(self.crm_client.pk),
+                    "delivery_personnel": "Tolu Ade",
+                    "delivered_to": "Acme Stores",
+                    "delivery_address": "Ibadan",
+                    "items": [
+                        {
+                            "item": created.data["items"][0]["id"],
+                            "quantity": "2",
+                        }
+                    ],
+                },
+                format="json",
+            )
+        self.assertEqual(waybill.status_code, status.HTTP_201_CREATED, waybill.data)
+        self.assertTrue(waybill.data["document_available"])
+        line_id = waybill.data["items"][0]["id"]
+        accepted = self.client.post(
+            reverse("item-verdict-list"),
+            {
+                "waybill_item": line_id,
+                "verdict": "ACCEPTED",
+                "quantity": "1",
+                "client_recipient": "Bola",
+            },
+            format="json",
+        )
+        self.assertEqual(accepted.status_code, status.HTTP_201_CREATED, accepted.data)
+        too_much = self.client.post(
+            reverse("item-verdict-list"),
+            {
+                "waybill_item": line_id,
+                "verdict": "REJECTED",
+                "quantity": "2",
+                "reason": "Wrong specification",
+            },
+            format="json",
+        )
+        self.assertEqual(too_much.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_accepted_verdict_delivers_item_and_fulfils_linked_po(self):
+        created = self.client.post(
+            reverse("item-request-list"), self.request_payload(), format="json"
+        )
+        item = created.data["items"][0]
+        po = self.client.post(
+            reverse("purchase-order-list"),
+            {
+                "client": str(self.crm_client.pk),
+                "client_reference": "CLIENT-PO-AUTO",
+                "items": [{"item": item["id"], "quantity": "2"}],
+            },
+            format="json",
+        )
+        with patch(
+            "procurement.services.get_document_storage",
+            return_value=FakePictureStorage(),
+        ):
+            waybill = self.client.post(
+                reverse("waybill-list"),
+                {
+                    "client": str(self.crm_client.pk),
+                    "purchase_order": po.data["id"],
+                    "delivery_personnel": "Tolu Ade",
+                    "delivered_to": self.crm_client.display_name,
+                    "delivery_address": "Ibadan",
+                    "items": [{"item": item["id"], "quantity": "2"}],
+                },
+                format="json",
+            )
+        verdict = self.client.post(
+            reverse("item-verdict-list"),
+            {
+                "waybill_item": waybill.data["items"][0]["id"],
+                "verdict": "ACCEPTED",
+                "quantity": "2",
+            },
+            format="json",
+        )
+        self.assertEqual(verdict.status_code, status.HTTP_201_CREATED, verdict.data)
+        self.assertEqual(
+            RequestedItem.objects.get(pk=item["id"]).status,
+            RequestedItem.Status.DELIVERED,
+        )
+        po_detail = self.client.get(
+            reverse("purchase-order-detail", args=[po.data["id"]])
+        )
+        self.assertEqual(po_detail.data["status"], "FULFILLED")
+
+    def test_rejected_verdict_sets_linked_po_attention_required(self):
+        created = self.client.post(
+            reverse("item-request-list"), self.request_payload(), format="json"
+        )
+        item = created.data["items"][0]
+        po = self.client.post(
+            reverse("purchase-order-list"),
+            {
+                "client": str(self.crm_client.pk),
+                "client_reference": "CLIENT-PO-REJECT",
+                "items": [{"item": item["id"], "quantity": "2"}],
+            },
+            format="json",
+        )
+        with patch(
+            "procurement.services.get_document_storage",
+            return_value=FakePictureStorage(),
+        ):
+            waybill = self.client.post(
+                reverse("waybill-list"),
+                {
+                    "client": str(self.crm_client.pk),
+                    "purchase_order": po.data["id"],
+                    "delivery_personnel": "Tolu Ade",
+                    "delivered_to": self.crm_client.display_name,
+                    "delivery_address": "Ibadan",
+                    "items": [{"item": item["id"], "quantity": "2"}],
+                },
+                format="json",
+            )
+        rejected = self.client.post(
+            reverse("item-verdict-list"),
+            {
+                "waybill_item": waybill.data["items"][0]["id"],
+                "verdict": "REJECTED",
+                "quantity": "1",
+                "reason": "Wrong specification",
+            },
+            format="json",
+        )
+        self.assertEqual(rejected.status_code, status.HTTP_201_CREATED, rejected.data)
+        po_detail = self.client.get(
+            reverse("purchase-order-detail", args=[po.data["id"]])
+        )
+        self.assertEqual(po_detail.data["status"], "ATTENTION_REQUIRED")
+
     def test_analytics_cache_regenerates_after_activity_threshold(self):
         created = self.client.post(
             reverse("item-request-list"), self.request_payload(), format="json"
@@ -454,8 +947,12 @@ def picture_file(name, size=None):
 class FakePictureStorage:
     def __init__(self):
         self.deleted = []
+        self.content = b""
 
     def upload(self, *, document_id, filename, **kwargs):
+        file_object = kwargs.get("file_object")
+        if file_object:
+            self.content = file_object.read()
         path = f"fake/{document_id}/{filename}"
         return StoredDocument(
             provider="supabase", external_file_id=path, storage_path=path
@@ -463,3 +960,13 @@ class FakePictureStorage:
 
     def delete(self, *, external_file_id, storage_path):
         self.deleted.append(external_file_id)
+
+    def download(self, *, filename, mime_type, **kwargs):
+        from io import BytesIO
+
+        return DownloadedDocument(
+            file_object=BytesIO(self.content),
+            filename=filename,
+            mime_type=mime_type,
+            size_bytes=len(self.content),
+        )
