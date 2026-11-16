@@ -116,7 +116,10 @@ def render_quotation_pdf(snapshot):
                 p(index),
                 p(item["description"]),
                 p(money(item["unit_price"]), right),
-                p(f"{Decimal(item['quantity']):g} {item['unit']}", right),
+                p(
+                    f"{format(Decimal(item['quantity']).normalize(), 'f')} {item['unit']}",
+                    right,
+                ),
                 p(money(item["amount"]), right),
             ]
         )

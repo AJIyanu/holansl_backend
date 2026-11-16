@@ -94,6 +94,9 @@ class RequestedItemSerializer(serializers.ModelSerializer):
     latest_quotation_price = serializers.DecimalField(
         max_digits=18, decimal_places=2, read_only=True, allow_null=True
     )
+    latest_quotation_description = serializers.CharField(
+        read_only=True, allow_null=True
+    )
 
     def get_latest_activity(self, obj):
         row = next(iter(obj.activities.all()), None)
@@ -124,6 +127,7 @@ class RequestedItemSerializer(serializers.ModelSerializer):
             "latest_activity",
             "activity_count",
             "latest_quotation_price",
+            "latest_quotation_description",
             "created_by_name",
             "created_at",
             "updated_at",
@@ -335,7 +339,9 @@ class SupplierQuoteSerializer(serializers.ModelSerializer):
 
 class ClientQuotationItemInput(serializers.Serializer):
     item = serializers.PrimaryKeyRelatedField(queryset=m.RequestedItem.objects.all())
-    description = serializers.CharField(max_length=1000)
+    description = serializers.CharField(
+        max_length=1000, required=False, allow_blank=True
+    )
     quantity = serializers.DecimalField(
         max_digits=18, decimal_places=4, min_value=Decimal("0.0001")
     )

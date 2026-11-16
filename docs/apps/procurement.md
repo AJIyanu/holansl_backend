@@ -66,6 +66,12 @@ the supplier response arrived by email, WhatsApp, call, physical copy, portal or
 described custom channel. An optional PDF/JPEG/PNG/WebP attachment is stored in
 private Supabase storage, limited to 10 MB, and downloaded through
 `GET /procurement/supplier-quotes/{id}/attachment/` with a dedicated permission.
+`PATCH /procurement/supplier-quotes/{id}/` edits the header, line prices and optional
+attachment with the model's change permission. Existing lines remain editable after
+their tracker item has progressed; newly added lines must still be open/suspended.
+Every affected item receives an attributed `SUPPLIER_QUOTE_EDITED` activity stating
+the previous and current values. A replacement attachment is stored before the old
+provider object is removed.
 
 Every line appends an attributed `SUPPLIER_QUOTE_ADDED` item activity. Its source
 is the supplier-quote line and metadata identifies the parent quote so the
@@ -78,8 +84,9 @@ quotations for an active CRM client. Selected items must be open/suspended;
 items requested by other clients may also be included. References are transactionally allocated by Lagos calendar
 date as `HOL-QTN-YYMMDD-SN`, with the serial resetting to `01` each day.
 
-Each line snapshots its tracker item name, client-facing description, quantity,
-unit and price. Optional VAT defaults to 7.5%; discount may be absent, percentage
+Each line snapshots its tracker item name, optional custom quotation name, quantity,
+unit and price. A blank custom name defaults to the tracked item name. Optional VAT
+defaults to 7.5%; discount may be absent, percentage
 or amount. `POST /procurement/client-quotations/{id}/issue/` freezes an immutable
 snapshot, renders the invoice-derived layout as a quotation PDF, stores it privately
 and records attributed issue activities. `GET .../{id}/download/` downloads the
@@ -112,7 +119,7 @@ starts at `01`. A PO belongs to an active CRM client, but any open tracker item 
 be included regardless of the client that originally requested it. Lines snapshot
 quantity, unit and an optional price. Status begins `QUEUED` and may be explicitly
 changed through `POST /procurement/purchase-orders/{id}/status/` to `ACTIVE`,
-`FULFILLED`, `ATTENTION_REQUIRED` or `SUSPENDED`, with a mandatory reason. PO
+`FULFILLED`, `ATTENTION_REQUIRED` or `SUSPENDED`, with an optional reason. PO
 creation and each status change append detailed activity to every linked item.
 Optional PDF/image attachments are privately stored and permission-protected.
 Attachments accept PDF, JPEG, PNG or WebP up to 5 MB. Status-change reasons are
@@ -123,6 +130,8 @@ PO linkage, supplier document reference, currency, logistics method/cost and one
 or more tracked item quantities and prices. The source need not carry a supplier
 role. Each line appends a priced, attributed purchase activity. This operational
 record does not create a Ledger or cash-book posting.
+Recording a purchase linked to a non-active, unfulfilled PO atomically changes that
+PO to Active and appends the transition to each purchased item's tracker.
 Each purchase line begins `PAID` and may be changed through the purchase item-status
 action to `TRANSIT`, `RECEIVED`, `RETURNED` or `REFUNDED`. Each change records the
 actor, old/new state, quantity, value and optional reason in the item tracker.
@@ -131,6 +140,8 @@ actor, old/new state, quantity, value and optional reason in the item tracker.
 
 `GET|POST /procurement/waybills/` generates and permanently records waybills with
 references `HOL-WYB-YYMMDD-SN`. Lines snapshot item description, quantity and unit.
+When no description is submitted, the latest saved client-quotation item name is
+used, then the tracked item name if no quotation exists.
 The immutable issue snapshot also stores the sample template's delivery personnel,
 delivered-to party, address, logistics, driver/vehicle, signatory, received time and
 notes. The generated PDF uses the existing Holan document header and private
@@ -147,8 +158,8 @@ returned plus disposed quantity cannot exceed rejected quantity. Rejection, retu
 and disposal require reasons; returns also require the receiving CRM supplier, and
 disposal requires a method and authorising staff member. Verdicts are append-only
 business history and append a complete attributed tracker activity.
-An accepted verdict atomically marks the tracker item Delivered once cumulative
-accepted quantity reaches the requested quantity. A linked PO becomes Fulfilled
+Any accepted verdict atomically marks the tracker item Delivered with the reason
+`Item was Accepted`. A linked PO becomes Fulfilled
 once accepted quantities satisfy every PO line. A rejected verdict atomically
 moves the linked PO to Attention required. Fulfilled-PO waybill lines cannot accept
 new verdicts and fulfilled POs are excluded from new operational selections.

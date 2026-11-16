@@ -23,6 +23,12 @@ from .quotation_documents import render_quotation_pdf
 from .waybill_documents import render_waybill_pdf
 
 LAGOS = ZoneInfo("Africa/Lagos")
+
+
+def decimal_display(value):
+    return format(Decimal(str(value)).normalize(), "f")
+
+
 ACTIVITY_TITLES = {
     "SOURCING": "Item is being sourced",
     "SUPPLIER_SEARCH": "Supplier search in progress",
@@ -150,7 +156,7 @@ def create_request(user, data):
             description=(
                 f"{name} registered a request received via "
                 f"{request.get_received_via_display() or 'an unspecified channel'} for "
-                f"{item.quantity:g} {item.unit} of {item.name}; the item had no previous "
+                f"{decimal_display(item.quantity)} {item.unit} of {item.name}; the item had no previous "
                 "tracker state and is now Open."
             ),
             occurred_at=request.received_at,
@@ -467,7 +473,7 @@ def _line_measurement(
     total = taxable + tax
     symbol = {"NGN": "₦", "USD": "$", "GBP": "£"}.get(currency, f"{currency} ")
     result = (
-        f"{line.quantity:g} {line.unit} at {symbol}{line.unit_price:,.2f} each; "
+        f"{decimal_display(line.quantity)} {line.unit} at {symbol}{line.unit_price:,.2f} each; "
         f"subtotal {symbol}{subtotal:,.2f}"
     )
     if discount:
@@ -573,6 +579,144 @@ def create_supplier_quote(user, data, attachment=None):
                 "updated_at",
             ]
         )
+    return quote
+
+
+@transaction.atomic
+def edit_supplier_quote(user, quote, data, attachment=None):
+    quote = (
+        m.SupplierQuote.objects.select_for_update()
+        .prefetch_related("items__item")
+        .get(pk=quote.pk)
+    )
+    supplier = data["supplier"]
+    ensure_supplier(supplier)
+    rows = data.pop("items")
+    existing_item_ids = {line.item_id for line in quote.items.all()}
+    if any(
+        row["item"].status not in {"OPEN", "SUSPENDED"}
+        and row["item"].id not in existing_item_ids
+        for row in rows
+    ):
+        raise ValidationError(
+            {"items": "Only open or suspended items can receive supplier prices."}
+        )
+    _validate_quote_attachment(attachment)
+    previous_lines = {str(line.item_id): line for line in quote.items.all()}
+    header_changes = []
+    for field, value in data.items():
+        previous = getattr(quote, field)
+        if previous != value:
+            label = field.replace("_", " ")
+            old = previous.display_name if field == "supplier" else previous
+            new = value.display_name if field == "supplier" else value
+            old_text = decimal_display(old) if isinstance(old, Decimal) else old
+            new_text = decimal_display(new) if isinstance(new, Decimal) else new
+            header_changes.append(
+                f"{label} changed from {old_text or 'none'} to {new_text or 'none'}"
+            )
+            setattr(quote, field, value)
+    quote.supplier_name = supplier.display_name
+    quote.save()
+
+    quote.items.all().delete()
+    name = actor_name(user)
+    new_lines = {}
+    for values in rows:
+        item = values.pop("item")
+        line = m.SupplierQuoteItem.objects.create(
+            quote=quote,
+            item=item,
+            item_name=item.name,
+            unit=item.unit,
+            created_by=user,
+            created_by_name=name,
+            **values,
+        )
+        new_lines[str(item.id)] = line
+
+    for item_id in set(previous_lines) | set(new_lines):
+        before = previous_lines.get(item_id)
+        after = new_lines.get(item_id)
+        item = (after or before).item
+        changes = list(header_changes)
+        if before and after:
+            for field, label in [
+                ("quantity", "quantity"),
+                ("unit_price", "unit price"),
+                ("tax_enabled", "tax inclusion"),
+                ("tax_rate", "tax rate"),
+                ("note", "note"),
+            ]:
+                old, new = getattr(before, field), getattr(after, field)
+                if old != new:
+                    if field in {"quantity", "unit_price", "tax_rate"}:
+                        old_text = decimal_display(old)
+                        new_text = decimal_display(new)
+                    else:
+                        old_text, new_text = old, new
+                    changes.append(
+                        f"{label} changed from {old_text or 'none'} to {new_text or 'none'}"
+                    )
+        elif after:
+            changes.append("the item was added to the supplier quotation")
+        else:
+            changes.append("the item was removed from the supplier quotation")
+        detail = "; ".join(changes) or "the quotation was saved without a value change"
+        measurement = (
+            _line_measurement(
+                after,
+                quote.currency,
+                tax_enabled=after.tax_enabled,
+                tax_rate=after.tax_rate,
+            )
+            if after
+            else f"the removed line was {decimal_display(before.quantity)} {before.unit} at {quote.currency} {before.unit_price:,.2f} each"
+        )
+        _quote_activity(
+            user,
+            item,
+            code="SUPPLIER_QUOTE_EDITED",
+            title="Supplier quotation edited",
+            description=(
+                f"{name} edited the supplier quotation from {quote.supplier_name} "
+                f"through the Procurement supplier quote form: {detail}; {measurement}."
+            ),
+            source_type="SUPPLIER_QUOTE_ITEM",
+            source_id=(after or before).id,
+            metadata={"quote_id": str(quote.id), "supplier": quote.supplier_name},
+        )
+
+    if attachment:
+        old_storage = (
+            quote.attachment_storage_provider,
+            quote.attachment_external_file_id,
+            quote.attachment_storage_path,
+        )
+        filename = sanitize_document_filename(attachment.name)
+        checksum = calculate_document_checksum(attachment)
+        attachment.seek(0)
+        stored = get_document_storage("supabase").upload(
+            document_id=quote.id,
+            party_id=supplier.id,
+            category=f"PROCUREMENT/SUPPLIER_QUOTES/{quote.id}",
+            filename=filename,
+            mime_type=(attachment.content_type or "").lower(),
+            size_bytes=attachment.size,
+            file_object=attachment.file,
+        )
+        quote.attachment_filename = filename
+        quote.attachment_mime_type = (attachment.content_type or "").lower()
+        quote.attachment_size_bytes = attachment.size
+        quote.attachment_checksum = checksum
+        quote.attachment_storage_provider = stored.provider
+        quote.attachment_external_file_id = stored.external_file_id
+        quote.attachment_storage_path = stored.storage_path
+        quote.save()
+        if old_storage[1]:
+            get_document_storage(old_storage[0]).delete(
+                external_file_id=old_storage[1], storage_path=old_storage[2]
+            )
     return quote
 
 
@@ -708,6 +852,7 @@ def create_client_quotation(user, data):
     )
     for row in rows:
         item = row.pop("item")
+        row["description"] = row.get("description", "").strip() or item.name
         m.ClientQuotationItem.objects.create(
             quotation=quote,
             item=item,
@@ -804,7 +949,12 @@ def edit_client_quotation(user, quote, data):
             ]:
                 old, new = getattr(before, field), getattr(after, field)
                 if old != new:
-                    changes.append(f"{label} changed from {old} to {new}")
+                    if field in {"quantity", "unit_price"}:
+                        old_text = decimal_display(old)
+                        new_text = decimal_display(new)
+                    else:
+                        old_text, new_text = old, new
+                    changes.append(f"{label} changed from {old_text} to {new_text}")
         elif after:
             changes.append("the item was added to the quotation")
         else:
@@ -823,7 +973,7 @@ def edit_client_quotation(user, quote, data):
                 tax_rate=quote.tax_rate,
             )
             if after
-            else f"the previous line of {before.quantity:g} {before.unit} at {quote.currency} {before.unit_price:,.2f} was removed"
+            else f"the previous line of {decimal_display(before.quantity)} {before.unit} at {quote.currency} {before.unit_price:,.2f} was removed"
         )
         _quote_activity(
             user,
@@ -1187,7 +1337,7 @@ def create_purchase_order(user, data, attachment=None):
             item,
             "PURCHASE_ORDER_RECEIVED",
             "Purchase order received",
-            f"{name} recorded client purchase order {po.reference} ({po.client_reference}) through the Procurement purchase-order form for {line.quantity:g} {line.unit} of {item.name}{price}; the PO is now Queued.",
+            f"{name} recorded client purchase order {po.reference} ({po.client_reference}) through the Procurement purchase-order form for {decimal_display(line.quantity)} {line.unit} of {item.name}{price}; the PO is now Queued.",
             "purchase_order",
             po.id,
             {"purchase_order_reference": po.reference, "line_id": str(line.id)},
@@ -1211,7 +1361,7 @@ def change_purchase_order_status(user, po, status, reason):
             line.item,
             "PURCHASE_ORDER_STATUS_CHANGED",
             "Purchase order status changed",
-            f"{name} changed purchase order {po.reference} from {m.PurchaseOrder.Status(previous).label} to {m.PurchaseOrder.Status(status).label} through the Procurement purchase-order controls{f' because {reason}' if reason else ''}; the order covers {line.quantity:g} {line.unit} of {line.item_name}.",
+            f"{name} changed purchase order {po.reference} from {m.PurchaseOrder.Status(previous).label} to {m.PurchaseOrder.Status(status).label} through the Procurement purchase-order controls{f' because {reason}' if reason else ''}; the order covers {decimal_display(line.quantity)} {line.unit} of {line.item_name}.",
             "purchase_order",
             po.id,
             {"from": previous, "to": status, "reason": reason},
@@ -1232,6 +1382,12 @@ def create_purchase(user, data):
         created_by=user,
         created_by_name=name,
     )
+    po = purchase.purchase_order
+    previous_po_status = po.status if po else ""
+    if po and po.status != "ACTIVE":
+        po.status = "ACTIVE"
+        po.status_reason = "A supplier purchase was recorded for this purchase order."
+        po.save(update_fields=["status", "status_reason", "updated_at"])
     logistics = (
         purchase.get_logistics_method_display()
         if purchase.logistics_method
@@ -1261,11 +1417,22 @@ def create_purchase(user, data):
             item,
             "ITEM_PURCHASED",
             "Item purchased",
-            f"{name} recorded the purchase of {line.quantity:g} {line.unit} of {item.name} from {party.display_name} at {purchase.currency} {line.unit_price:,.2f} each ({purchase.currency} {line.quantity * line.unit_price:,.2f} total), using {logistics}{po_text}; the item remains {item.get_status_display()}.",
+            f"{name} recorded the purchase of {decimal_display(line.quantity)} {line.unit} of {item.name} from {party.display_name} at {purchase.currency} {line.unit_price:,.2f} each ({purchase.currency} {line.quantity * line.unit_price:,.2f} total), using {logistics}{po_text}; the item remains {item.get_status_display()}.",
             "purchase",
             purchase.id,
             {"purchase_id": str(purchase.id), "line_id": str(line.id)},
         )
+        if po and previous_po_status != "ACTIVE":
+            _activity(
+                user,
+                item,
+                "PURCHASE_ORDER_ACTIVATED",
+                "Purchase order activated",
+                f"{name} recorded a supplier purchase of {decimal_display(line.quantity)} {line.unit} of {item.name}, which changed purchase order {po.reference} from {m.PurchaseOrder.Status(previous_po_status).label} to Active.",
+                "purchase_order",
+                po.id,
+                {"from": previous_po_status, "to": "ACTIVE"},
+            )
     return purchase
 
 
@@ -1298,7 +1465,7 @@ def change_purchase_item_status(user, purchase, line_id, status, reason=""):
         line.item,
         "PURCHASE_STATUS_CHANGED",
         "Purchase status changed",
-        f"{name} changed the purchase status for {line.quantity:g} {line.unit} of {line.item_name} from {m.PurchaseItem.Status(previous).label} to {m.PurchaseItem.Status(status).label} through the Procurement purchase controls{f' because {reason}' if reason else ''}; the recorded purchase value remains {line.purchase.currency} {line.quantity * line.unit_price:,.2f}.",
+        f"{name} changed the purchase status for {decimal_display(line.quantity)} {line.unit} of {line.item_name} from {m.PurchaseItem.Status(previous).label} to {m.PurchaseItem.Status(status).label} through the Procurement purchase controls{f' because {reason}' if reason else ''}; the recorded purchase value remains {line.purchase.currency} {line.quantity * line.unit_price:,.2f}.",
         "purchase",
         line.purchase_id,
         {"purchase_item_id": str(line.id), "from": previous, "to": status},
@@ -1358,9 +1525,16 @@ def create_waybill(user, data):
     )
     for values in rows:
         item = values.pop("item")
-        description = (
-            values.pop("description", "").strip() or item.description or item.name
-        )
+        description = values.pop("description", "").strip()
+        if not description:
+            latest_quote_line = (
+                m.ClientQuotationItem.objects.filter(item=item)
+                .order_by("-quotation__quotation_date", "-created_at")
+                .first()
+            )
+            description = (
+                latest_quote_line.description if latest_quote_line else item.name
+            )
         line = m.WaybillItem.objects.create(
             waybill=waybill,
             item=item,
@@ -1376,7 +1550,7 @@ def create_waybill(user, data):
             item,
             "ITEM_WAYBILLED",
             "Item waybilled",
-            f"{name} added {line.quantity:g} {line.unit} of {item.name} to waybill {waybill.reference} for delivery to {waybill.delivered_to} at {waybill.delivery_address} using {waybill.logistics_method or 'an unspecified logistics method'}; the item remains {item.get_status_display()}.",
+            f"{name} added {decimal_display(line.quantity)} {line.unit} of {item.name} to waybill {waybill.reference} for delivery to {waybill.delivered_to} at {waybill.delivery_address} using {waybill.logistics_method or 'an unspecified logistics method'}; the item remains {item.get_status_display()}.",
             "waybill",
             waybill.id,
             {"waybill_reference": waybill.reference, "waybill_item_id": str(line.id)},
@@ -1443,7 +1617,7 @@ def record_waybill_communication(user, waybill, method, destination=""):
             line.item,
             f"WAYBILL_{method}",
             f"Waybill {verb}",
-            f"{actor_name(user)} {verb} waybill {waybill.reference} as a PDF{' to ' + destination if destination else ''} through the Procurement waybill controls for {line.quantity:g} {line.unit} of {line.item_name}; the recorded waybill quantity remains {line.quantity:g} {line.unit}.",
+            f"{actor_name(user)} {verb} waybill {waybill.reference} as a PDF{' to ' + destination if destination else ''} through the Procurement waybill controls for {decimal_display(line.quantity)} {line.unit} of {line.item_name}; the recorded waybill quantity remains {decimal_display(line.quantity)} {line.unit}.",
             "waybill",
             waybill.id,
             {"waybill_reference": waybill.reference, "communication_id": str(row.id)},
@@ -1526,16 +1700,13 @@ def create_item_verdict(user, data):
         line.item,
         f"ITEM_{verdict}",
         f"Item {row.get_verdict_display().lower()}",
-        f"{actor_name(user)} recorded {quantity:g} {line.unit} of {line.item_name} as {row.get_verdict_display().lower()} against waybill {line.waybill.reference}{third_party}{reason}; accepted and rejected now total {accepted_rejected + quantity if verdict in {'ACCEPTED', 'REJECTED'} else accepted_rejected:g} of {line.quantity:g} {line.unit}, while returned and disposed now total {returned_disposed + quantity if verdict in {'RETURNED', 'DISPOSED'} else returned_disposed:g} of {totals.get('REJECTED', Decimal('0')):g} rejected.",
+        f"{actor_name(user)} recorded {decimal_display(quantity)} {line.unit} of {line.item_name} as {row.get_verdict_display().lower()} against waybill {line.waybill.reference}{third_party}{reason}; accepted and rejected now total {decimal_display(accepted_rejected + quantity if verdict in {'ACCEPTED', 'REJECTED'} else accepted_rejected)} of {decimal_display(line.quantity)} {line.unit}, while returned and disposed now total {decimal_display(returned_disposed + quantity if verdict in {'RETURNED', 'DISPOSED'} else returned_disposed)} of {decimal_display(totals.get('REJECTED', Decimal('0')))} rejected.",
         "item_verdict",
         row.id,
         {"waybill_reference": line.waybill.reference, "verdict": verdict},
     )
     if verdict == "ACCEPTED":
-        accepted_for_item = m.ItemVerdict.objects.filter(
-            item=line.item, verdict="ACCEPTED"
-        ).aggregate(total=Sum("quantity"))["total"] or Decimal("0")
-        if accepted_for_item >= line.item.quantity and line.item.status != "DELIVERED":
+        if line.item.status != "DELIVERED":
             previous_item_status = line.item.status
             line.item.status = "DELIVERED"
             line.item.completed_at = timezone.now()
@@ -1548,7 +1719,7 @@ def create_item_verdict(user, data):
                 line.item,
                 "ITEM_DELIVERED",
                 "Item delivered",
-                f"{actor_name(user)} caused {line.item.name} to move from {m.RequestedItem.Status(previous_item_status).label} to Delivered after cumulative accepted verdicts reached {accepted_for_item:g} {line.unit} against a requested quantity of {line.item.quantity:g} {line.item.unit}.",
+                f"{actor_name(user)} changed {line.item.name} from {m.RequestedItem.Status(previous_item_status).label} to Delivered through the accepted item verdict; reason: Item was Accepted; {decimal_display(quantity)} {line.unit} was accepted against waybill {line.waybill.reference}.",
                 "item_verdict",
                 row.id,
                 {"from": previous_item_status, "to": "DELIVERED"},
@@ -1564,7 +1735,7 @@ def create_item_verdict(user, data):
             line.item,
             "PURCHASE_ORDER_ATTENTION_REQUIRED",
             "Purchase order needs attention",
-            f"{actor_name(user)} recorded a rejected verdict for {quantity:g} {line.unit} of {line.item_name} on waybill {line.waybill.reference}; purchase order {po.reference} changed from {m.PurchaseOrder.Status(previous_po_status).label} to Attention required.",
+            f"{actor_name(user)} recorded a rejected verdict for {decimal_display(quantity)} {line.unit} of {line.item_name} on waybill {line.waybill.reference}; purchase order {po.reference} changed from {m.PurchaseOrder.Status(previous_po_status).label} to Attention required.",
             "purchase_order",
             po.id,
             {"from": previous_po_status, "to": "ATTENTION_REQUIRED"},
@@ -1593,7 +1764,7 @@ def create_item_verdict(user, data):
                     po_line.item,
                     "PURCHASE_ORDER_FULFILLED",
                     "Purchase order fulfilled",
-                    f"{actor_name(user)} completed the accepted verdict that satisfied all ordered quantities on purchase order {po.reference}; the PO changed from {m.PurchaseOrder.Status(previous_po_status).label} to Fulfilled, including {po_line.quantity:g} {po_line.unit} of {po_line.item_name}.",
+                    f"{actor_name(user)} completed the accepted verdict that satisfied all ordered quantities on purchase order {po.reference}; the PO changed from {m.PurchaseOrder.Status(previous_po_status).label} to Fulfilled, including {decimal_display(po_line.quantity)} {po_line.unit} of {po_line.item_name}.",
                     "purchase_order",
                     po.id,
                     {"from": previous_po_status, "to": "FULFILLED"},

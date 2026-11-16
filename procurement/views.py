@@ -34,6 +34,9 @@ def item_queryset():
         .annotate(
             activity_count=Count("activities", distinct=True),
             latest_quotation_price=Subquery(latest_price.values("unit_price")[:1]),
+            latest_quotation_description=Subquery(
+                latest_price.values("description")[:1]
+            ),
         )
     )
 
@@ -259,11 +262,14 @@ class SupplierQuoteViewSet(viewsets.ModelViewSet):
     ordering_fields = ["quotation_date", "expires_on", "created_at", "supplier_name"]
     ordering = ["-quotation_date", "-created_at"]
     parser_classes = [JSONParser, MultiPartParser, FormParser]
-    http_method_names = ["get", "post", "head", "options"]
-    action_permissions = {"attachment": "procurement.download_supplierquote"}
+    http_method_names = ["get", "post", "patch", "head", "options"]
+    action_permissions = {
+        "partial_update": "procurement.change_supplierquote",
+        "attachment": "procurement.download_supplierquote",
+    }
 
-    def create(self, request):
-        # Use a plain mapping: DRF treats QueryDict nested lists as HTML fields.
+    @staticmethod
+    def _payload(request):
         payload = {key: request.data.get(key) for key in request.data}
         if payload.get("expires_on") == "":
             payload.pop("expires_on")
@@ -271,7 +277,14 @@ class SupplierQuoteViewSet(viewsets.ModelViewSet):
             try:
                 payload["items"] = json.loads(payload["items"])
             except json.JSONDecodeError:
-                return Response({"items": ["Submit valid item details."]}, status=400)
+                return None
+        return payload
+
+    def create(self, request):
+        # Use a plain mapping: DRF treats QueryDict nested lists as HTML fields.
+        payload = self._payload(request)
+        if payload is None:
+            return Response({"items": ["Submit valid item details."]}, status=400)
         form = z.SupplierQuoteInput(data=payload)
         form.is_valid(raise_exception=True)
         quote = services.create_supplier_quote(
@@ -279,6 +292,20 @@ class SupplierQuoteViewSet(viewsets.ModelViewSet):
         )
         quote = self.get_queryset().get(pk=quote.pk)
         return Response(self.get_serializer(quote).data, status=201)
+
+    def partial_update(self, request, *args, **kwargs):
+        payload = self._payload(request)
+        if payload is None:
+            return Response({"items": ["Submit valid item details."]}, status=400)
+        form = z.SupplierQuoteInput(data=payload)
+        form.is_valid(raise_exception=True)
+        quote = services.edit_supplier_quote(
+            request.user,
+            self.get_object(),
+            dict(form.validated_data),
+            request.FILES.get("attachment"),
+        )
+        return Response(self.get_serializer(self.get_queryset().get(pk=quote.pk)).data)
 
     @action(detail=False, methods=["get"], url_path="supplier-options")
     def supplier_options(self, request):

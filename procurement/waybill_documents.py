@@ -92,7 +92,7 @@ def render_waybill_pdf(snapshot):
             [
                 p(index),
                 p(item["description"]),
-                p(f"{Decimal(str(item['quantity'])):g}", right),
+                p(format(Decimal(str(item["quantity"])).normalize(), "f"), right),
                 p(item["unit"], right),
             ]
         )

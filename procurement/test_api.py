@@ -40,6 +40,7 @@ class ProcurementItemRequestTests(APITestCase):
                 "add_requesteditemimage",
                 "delete_requesteditemimage",
                 "add_supplierquote",
+                "change_supplierquote",
                 "view_supplierquote",
                 "download_supplierquote",
                 "add_clientquotation",
@@ -210,6 +211,36 @@ class ProcurementItemRequestTests(APITestCase):
             )
             self.assertEqual(activity.metadata["quote_id"], str(response.data["id"]))
             self.assertEqual(activity.created_by, self.user)
+
+    def test_supplier_quote_can_be_edited_and_records_old_and_new_values(self):
+        created = self.client.post(
+            reverse("item-request-list"), self.request_payload(), format="json"
+        )
+        item = created.data["items"][0]
+        quote = self.client.post(
+            reverse("supplier-quote-list"),
+            {
+                "supplier": str(self.supplier.pk),
+                "received_via": "EMAIL",
+                "items": [{"item": item["id"], "quantity": "1", "unit_price": "25000"}],
+            },
+            format="json",
+        )
+        response = self.client.patch(
+            reverse("supplier-quote-detail", args=[quote.data["id"]]),
+            {
+                "supplier": str(self.supplier.pk),
+                "received_via": "WHATSAPP",
+                "items": [{"item": item["id"], "quantity": "2", "unit_price": "27500"}],
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        activity = ItemActivity.objects.get(
+            item_id=item["id"], title_code="SUPPLIER_QUOTE_EDITED"
+        )
+        self.assertIn("unit price changed from 25000 to 27500", activity.description)
+        self.assertIn("quantity changed from 1 to 2", activity.description)
 
     def test_client_quotation_combines_items_and_allocates_daily_reference(self):
         created = self.client.post(
@@ -707,9 +738,16 @@ class ProcurementItemRequestTests(APITestCase):
             reverse("purchase-list"),
             {
                 "purchased_from": str(self.supplier.pk),
+                "purchase_order": po.data["id"],
                 "items": [{"item": item["id"], "quantity": "1", "unit_price": "500"}],
             },
             format="json",
+        )
+        self.assertEqual(
+            self.client.get(
+                reverse("purchase-order-detail", args=[po.data["id"]])
+            ).data["status"],
+            "ACTIVE",
         )
         line = purchase.data["items"][0]
         self.assertEqual(line["status"], "PAID")
@@ -759,6 +797,12 @@ class ProcurementItemRequestTests(APITestCase):
             format="json",
         )
         self.assertEqual(accepted.status_code, status.HTTP_201_CREATED, accepted.data)
+        delivered = RequestedItem.objects.get(pk=created.data["items"][0]["id"])
+        self.assertEqual(delivered.status, RequestedItem.Status.DELIVERED)
+        self.assertIn(
+            "Item was Accepted",
+            delivered.activities.get(title_code="ITEM_DELIVERED").description,
+        )
         too_much = self.client.post(
             reverse("item-verdict-list"),
             {
