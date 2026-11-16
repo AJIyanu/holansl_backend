@@ -2,9 +2,9 @@ import json
 import logging
 
 from django.db.models import Count, OuterRef, Prefetch, Subquery
-from django.http import FileResponse
+from django.http import FileResponse, HttpResponse
 from django_filters.rest_framework import DjangoFilterBackend
-from rest_framework import filters, status, viewsets
+from rest_framework import filters, serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
@@ -12,6 +12,7 @@ from rest_framework.response import Response
 from crm.models import Party
 from holansladminservices.pagination import StandardPagination
 from . import analytics, models as m, serializers as z, services
+from . import invoice_requests
 from .filters import ItemRequestFilter, RequestedItemFilter
 from .permissions import ProcurementPermission
 
@@ -99,6 +100,7 @@ class RequestedItemViewSet(viewsets.ReadOnlyModelViewSet):
         },
         "change_status": "procurement.change_itemstatus",
         "edit": "procurement.change_requesteditem",
+        "reorder": "procurement.add_itemrequest",
         "images": {
             "POST": "procurement.add_requesteditemimage",
             "DELETE": "procurement.delete_requesteditemimage",
@@ -138,6 +140,22 @@ class RequestedItemViewSet(viewsets.ReadOnlyModelViewSet):
         form.is_valid(raise_exception=True)
         row = services.edit_item(request.user, self.get_object(), form.validated_data)
         return Response(self.get_serializer(item_queryset().get(pk=row.pk)).data)
+
+    @action(detail=True, methods=["post"])
+    def reorder(self, request, pk=None):
+        form = z.ItemRequestInput(data=request.data)
+        form.is_valid(raise_exception=True)
+        row = services.reorder_item(
+            request.user, self.get_object(), dict(form.validated_data)
+        )
+        row = (
+            m.ItemRequest.objects.select_related("client", "created_by")
+            .prefetch_related(Prefetch("items", queryset=item_queryset()))
+            .get(pk=row.pk)
+        )
+        return Response(
+            z.ItemRequestSerializer(row).data, status=status.HTTP_201_CREATED
+        )
 
     @action(detail=True, methods=["post"], url_path="status")
     def change_status(self, request, pk=None):
@@ -629,3 +647,132 @@ class ItemVerdictViewSet(viewsets.ModelViewSet):
         return Response(
             self.get_serializer(self.get_queryset().get(pk=row.pk)).data, status=201
         )
+
+
+class InvoiceRequestViewSet(viewsets.ModelViewSet):
+    queryset = m.InvoiceRequest.objects.select_related(
+        "item",
+        "client",
+        "purchase_order",
+        "waybill",
+        "created_by",
+        "decided_by",
+        "sales_invoice",
+    )
+    serializer_class = z.InvoiceRequestSerializer
+    permission_classes = [ProcurementPermission]
+    pagination_class = StandardPagination
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = [
+        "item__name",
+        "item__code",
+        "client_name",
+        "purchase_order_reference",
+    ]
+    ordering_fields = ["created_at", "status", "client_name", "decided_at"]
+    ordering = ["-created_at"]
+    http_method_names = ["get", "post", "head", "options"]
+    action_permissions = {
+        "approve": "procurement.approve_invoicerequest",
+        "cancel": "procurement.cancel_invoicerequest",
+        "pdf": "procurement.view_invoicerequest",
+        "email": "procurement.email_invoicerequest",
+    }
+
+    def get_queryset(self):
+        rows = super().get_queryset()
+        status_value = self.request.query_params.get("status")
+        return (
+            rows.filter(status=status_value)
+            if status_value in {"QUEUED", "APPROVED", "CANCELLED"}
+            else rows
+        )
+
+    @action(detail=False, methods=["get"])
+    def eligible(self, request):
+        results = []
+        for item in item_queryset().filter(status="DELIVERED").order_by("-updated_at"):
+            try:
+                defaults = invoice_requests.item_defaults(item)
+            except Exception:
+                continue
+            active = item.invoice_requests.filter(
+                status__in=["QUEUED", "APPROVED"]
+            ).first()
+            results.append(
+                {
+                    **defaults,
+                    "quantity": str(defaults["quantity"]),
+                    "unit_price": str(defaults["unit_price"]),
+                    "purchase_order": str(defaults["purchase_order"].id),
+                    "waybill": str(defaults["waybill"].id),
+                    "request_status": active.status if active else None,
+                }
+            )
+        return Response(results)
+
+    def create(self, request):
+        item_id = request.data.get("item")
+        item = m.RequestedItem.objects.filter(pk=item_id).first()
+        if not item:
+            return Response({"item": ["Choose a tracked item."]}, status=400)
+        form = z.InvoiceRequestInput(data=request.data)
+        form.is_valid(raise_exception=True)
+        row = invoice_requests.create_invoice_request(
+            request.user, item, dict(form.validated_data)
+        )
+        return Response(
+            self.get_serializer(self.get_queryset().get(pk=row.pk)).data, status=201
+        )
+
+    @action(detail=True, methods=["post"])
+    def approve(self, request, pk=None):
+        form = z.InvoiceApprovalInput(data=request.data)
+        form.is_valid(raise_exception=True)
+        row = invoice_requests.approve_invoice_request(
+            request.user, self.get_object(), dict(form.validated_data)
+        )
+        return Response(self.get_serializer(self.get_queryset().get(pk=row.pk)).data)
+
+    @action(detail=True, methods=["post"])
+    def cancel(self, request, pk=None):
+        reason = serializers.CharField(min_length=2, max_length=2000).run_validation(
+            request.data.get("reason", "")
+        )
+        row = invoice_requests.cancel_invoice_request(
+            request.user, self.get_object(), reason
+        )
+        return Response(self.get_serializer(self.get_queryset().get(pk=row.pk)).data)
+
+    @action(detail=True, methods=["get"])
+    def pdf(self, request, pk=None):
+        from ledger.invoice_documents import render_invoice_pdf
+
+        row = self.get_object()
+        invoice = getattr(row, "sales_invoice", None)
+        if not invoice or not invoice.confirmed_revision_id:
+            return Response(
+                {"detail": "This request has no approved invoice."}, status=400
+            )
+        pdf = render_invoice_pdf(invoice.confirmed_revision.snapshot)
+        response = HttpResponse(pdf, content_type="application/pdf")
+        response["Content-Disposition"] = f'inline; filename="{invoice.reference}.pdf"'
+        return response
+
+    @action(detail=True, methods=["post"])
+    def email(self, request, pk=None):
+        from ledger.invoice_email import send_invoice
+
+        row = self.get_object()
+        invoice = getattr(row, "sales_invoice", None)
+        if not invoice:
+            return Response(
+                {"detail": "This request has no approved invoice."}, status=400
+            )
+        record = send_invoice(
+            actor=request.user,
+            invoice_id=invoice.id,
+            payload=request.data,
+            enforce_access=False,
+        )
+        return Response({"status": record.status, "destination": record.destination})

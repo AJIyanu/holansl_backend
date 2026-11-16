@@ -30,8 +30,9 @@ def default_message(name):
     return f"Dear {name},\n\nPlease find attached our invoice for the items detailed in the document.\n\nKindly review the invoice and contact us if you require any clarification.\n\nThank you for choosing HolanSL.\n\nKind regards,\nAccounts Department\nHolanSL"
 
 
-def send_invoice(*, actor, invoice_id, payload):
-    access(actor, "email")
+def send_invoice(*, actor, invoice_id, payload, enforce_access=True):
+    if enforce_access:
+        access(actor, "email")
     form = EmailInput(data=payload)
     form.is_valid(raise_exception=True)
     d = form.validated_data

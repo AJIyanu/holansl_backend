@@ -95,6 +95,13 @@ class RequestedItem(Record):
     request = models.ForeignKey(
         ItemRequest, on_delete=models.PROTECT, related_name="items"
     )
+    reordered_from = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="reorders",
+    )
     code = models.CharField(max_length=40, unique=True)
     name = models.CharField(max_length=255)
     description = models.TextField()
@@ -728,4 +735,74 @@ class ItemVerdict(Record):
             models.CheckConstraint(
                 condition=Q(quantity__gt=0), name="proc_verdict_qty_positive"
             )
+        ]
+
+
+class InvoiceRequest(Record):
+    class Status(models.TextChoices):
+        QUEUED = "QUEUED", "Queued"
+        APPROVED = "APPROVED", "Approved"
+        CANCELLED = "CANCELLED", "Cancelled"
+
+    item = models.ForeignKey(
+        RequestedItem, on_delete=models.PROTECT, related_name="invoice_requests"
+    )
+    client = models.ForeignKey(
+        "crm.Party",
+        on_delete=models.PROTECT,
+        related_name="procurement_invoice_requests",
+    )
+    client_name = models.CharField(max_length=255)
+    description = models.CharField(max_length=1000)
+    quantity = models.DecimalField(max_digits=12, decimal_places=4)
+    unit = models.CharField(max_length=40)
+    unit_price = models.DecimalField(max_digits=18, decimal_places=2)
+    currency = models.CharField(max_length=3, default="NGN")
+    purchase_order = models.ForeignKey(
+        PurchaseOrder,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="invoice_requests",
+    )
+    purchase_order_reference = models.CharField(max_length=40, blank=True)
+    waybill = models.ForeignKey(
+        Waybill,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="invoice_requests",
+    )
+    waybill_reference = models.CharField(max_length=40, blank=True)
+    notes = models.TextField(blank=True)
+    status = models.CharField(
+        max_length=12, choices=Status.choices, default=Status.QUEUED
+    )
+    decision_reason = models.TextField(blank=True)
+    decided_at = models.DateTimeField(null=True, blank=True)
+    decided_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+    )
+    decided_by_name = models.CharField(max_length=255, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at", "id"]
+        permissions = [
+            ("approve_invoicerequest", "Can approve procurement invoice requests"),
+            ("cancel_invoicerequest", "Can cancel procurement invoice requests"),
+            ("email_invoicerequest", "Can email approved procurement invoices"),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(quantity__gt=0), name="proc_invoice_request_qty_positive"
+            ),
+            models.CheckConstraint(
+                condition=Q(unit_price__gte=0),
+                name="proc_invoice_request_price_nonnegative",
+            ),
         ]

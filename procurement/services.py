@@ -168,6 +168,54 @@ def create_request(user, data):
 
 
 @transaction.atomic
+def reorder_item(user, source_item, data):
+    items = data.pop("items")
+    if len(items) != 1:
+        raise ValidationError({"items": "A reorder creates one new tracked item."})
+    client = data["client"]
+    ensure_client(client)
+    now = timezone.now()
+    code = allocate_codes(user, client, 1, now)[0]
+    name = actor_name(user)
+    request = m.ItemRequest.objects.create(
+        **data,
+        client_name=client.display_name,
+        created_by=user,
+        created_by_name=name,
+    )
+    item = m.RequestedItem.objects.create(
+        request=request,
+        reordered_from=source_item,
+        code=code,
+        created_by=user,
+        created_by_name=name,
+        **items[0],
+    )
+    m.ItemActivity.objects.create(
+        item=item,
+        category="SYSTEM",
+        title_code="ITEM_REORDERED",
+        title="Item reordered",
+        description=(
+            f"{name} reordered {item.name} from {source_item.code} through the "
+            f"Procurement reorder form for {decimal_display(item.quantity)} "
+            f"{item.unit}; the new tracker is {item.code} and is now Open."
+        ),
+        occurred_at=request.received_at,
+        status_result="OPEN",
+        source_type="REQUESTED_ITEM",
+        source_id=source_item.id,
+        metadata={
+            "reordered_from_id": str(source_item.id),
+            "reordered_from_code": source_item.code,
+        },
+        created_by=user,
+        created_by_name=name,
+    )
+    return request
+
+
+@transaction.atomic
 def add_activity(user, item, data):
     item = m.RequestedItem.objects.select_for_update().get(pk=item.pk)
     if item.status in {"DELIVERED", "CLOSED"}:

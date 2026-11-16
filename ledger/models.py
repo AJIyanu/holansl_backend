@@ -470,6 +470,13 @@ class InvoiceSequence(models.Model):
 class SalesInvoice(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     party = models.ForeignKey("crm.Party", on_delete=models.PROTECT)
+    invoice_request = models.OneToOneField(
+        "procurement.InvoiceRequest",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="sales_invoice",
+    )
     date = models.DateField()
     currency = models.CharField(max_length=3, choices=CURRENCIES, default="NGN")
     tax_rate = models.DecimalField(

@@ -35,6 +35,23 @@ properties and appends an attributed system activity containing readable field
 names plus previous and new values. Unchanged submissions and edits to delivered
 or closed items are rejected.
 
+Any item, regardless of status, may be reordered through
+`POST /procurement/items/{id}/reorder/` with one reviewed item-request payload.
+The client and copied item details may be changed. The operation creates a new
+request, item code and Open tracker linked by `reordered_from`; it does not append
+history to the source item. The new tracker begins with one `ITEM_REORDERED`
+activity identifying the source and new item codes, and that activity follows the
+normal Procurement/Management notification path.
+
+Every newly created item activity schedules one shared notification after the
+originating transaction commits. Recipients are all active staff assigned to the
+Procurement (`PROC`) or Management (`MGT`) department, including the actor when
+they belong to either department. The shared Notifications service creates
+Dashboard and Email deliveries, applies recipient preferences/provider handling,
+deduplicates by activity ID and links recipients directly to the item tracker.
+This model-level activity hook also covers future activity types without requiring
+each Procurement feature to implement separate notification logic.
+
 The API requires staff status plus model/action permissions. Custom permissions
 are `view_itemtracker`, `add_itemactivity`, `change_itemstatus`, and
 `download_itemimage`. New permissions are granted additively to CEO/CTO by the
@@ -163,3 +180,20 @@ Any accepted verdict atomically marks the tracker item Delivered with the reason
 once accepted quantities satisfy every PO line. A rejected verdict atomically
 moves the linked PO to Attention required. Fulfilled-PO waybill lines cannot accept
 new verdicts and fulfilled POs are excluded from new operational selections.
+
+## Invoice requests
+
+`GET|POST /procurement/invoice-requests/` lists and creates Account-facing invoice
+requests for delivered items. Eligible defaults come from the accepted verdict
+quantity and the linked purchase-order line price. Requests begin `QUEUED`; a
+cancelled request requires a reason and permits a later replacement request.
+Creation appends tracker history and sends Dashboard and Email notifications to
+active Account staff after commit.
+
+Permissioned Account staff approve through
+`POST /procurement/invoice-requests/{id}/approve/`. Approval creates and confirms a
+normal Sales Ledger invoice atomically, links it one-to-one to the request and marks
+the request `APPROVED`. Approved requests expose protected PDF and email actions to
+Procurement without granting broad Sales Ledger access. Every decision appends an
+attributed item activity. Migrations 0016 and Ledger 0030 add this workflow and are
+operator-applied.

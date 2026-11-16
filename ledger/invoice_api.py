@@ -46,6 +46,7 @@ class InvoiceSerializer(serializers.ModelSerializer):
             "tax_rate",
             "id",
             "party",
+            "invoice_request",
             "date",
             "currency",
             "reference",

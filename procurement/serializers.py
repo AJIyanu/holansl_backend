@@ -97,6 +97,9 @@ class RequestedItemSerializer(serializers.ModelSerializer):
     latest_quotation_description = serializers.CharField(
         read_only=True, allow_null=True
     )
+    reordered_from_code = serializers.CharField(
+        source="reordered_from.code", read_only=True, allow_null=True
+    )
 
     def get_latest_activity(self, obj):
         row = next(iter(obj.activities.all()), None)
@@ -107,6 +110,8 @@ class RequestedItemSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "request",
+            "reordered_from",
+            "reordered_from_code",
             "code",
             "name",
             "description",
@@ -187,6 +192,88 @@ class ItemEditInput(serializers.Serializer):
         choices=m.RequestedItem.Urgency.choices, required=False
     )
     deadline = serializers.DateField(required=False, allow_null=True)
+
+
+class InvoiceRequestInput(serializers.Serializer):
+    description = serializers.CharField(max_length=1000)
+    quantity = serializers.DecimalField(
+        max_digits=12, decimal_places=4, min_value=Decimal("0.0001")
+    )
+    unit = serializers.CharField(max_length=40)
+    unit_price = serializers.DecimalField(
+        max_digits=18, decimal_places=2, min_value=Decimal("0")
+    )
+    currency = serializers.ChoiceField(choices=["NGN", "USD", "GBP"], default="NGN")
+    notes = serializers.CharField(required=False, allow_blank=True)
+
+
+class InvoiceApprovalInput(serializers.Serializer):
+    date = serializers.DateField(required=False)
+    currency = serializers.ChoiceField(choices=["NGN", "USD", "GBP"])
+    billed_to = serializers.CharField(max_length=255)
+    billing_address = serializers.CharField(
+        max_length=1000, required=False, allow_blank=True
+    )
+    recipient_email = serializers.EmailField(required=False, allow_blank=True)
+    notes = serializers.CharField(max_length=2000, required=False, allow_blank=True)
+    discount_percent = serializers.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        min_value=Decimal("0"),
+        max_value=Decimal("100"),
+        default=Decimal("0"),
+    )
+    items = serializers.ListField(
+        child=serializers.DictField(), min_length=1, max_length=100
+    )
+
+
+class InvoiceRequestSerializer(serializers.ModelSerializer):
+    item_name = serializers.CharField(source="item.name", read_only=True)
+    item_code = serializers.CharField(source="item.code", read_only=True)
+    invoice_id = serializers.SerializerMethodField()
+    invoice_reference = serializers.SerializerMethodField()
+    invoice_version = serializers.SerializerMethodField()
+
+    def get_invoice_id(self, obj):
+        invoice = getattr(obj, "sales_invoice", None)
+        return str(invoice.id) if invoice else None
+
+    def get_invoice_reference(self, obj):
+        invoice = getattr(obj, "sales_invoice", None)
+        return invoice.reference if invoice else None
+
+    def get_invoice_version(self, obj):
+        invoice = getattr(obj, "sales_invoice", None)
+        return invoice.version if invoice else None
+
+    class Meta:
+        model = m.InvoiceRequest
+        fields = [
+            "id",
+            "item",
+            "item_name",
+            "item_code",
+            "client",
+            "client_name",
+            "description",
+            "quantity",
+            "unit",
+            "unit_price",
+            "currency",
+            "purchase_order_reference",
+            "waybill_reference",
+            "notes",
+            "status",
+            "decision_reason",
+            "decided_at",
+            "decided_by_name",
+            "invoice_id",
+            "invoice_reference", "invoice_version",
+            "created_by_name",
+            "created_at",
+            "updated_at",
+        ]
 
     def validate(self, attrs):
         if not attrs:

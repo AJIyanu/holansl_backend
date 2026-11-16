@@ -226,6 +226,13 @@ in disposable databases, but has NOT been applied to the application database.
 Staff require `ledger.view_salesledger` and `ledger.view_salesinvoice`, plus the
 relevant `add_salesinvoice`, `change_salesinvoice`, `confirm_salesinvoice`,
 `deliver_salesinvoice`, `print_salesinvoice` or `email_salesinvoice` permission.
+
+Procurement invoice requests appear in a cross-client Sales Ledger queue. Account
+staff can review and edit invoice fields, approve a queued request to create and
+confirm its Sales Ledger invoice, or cancel it with a required reason. The queue
+control is shown only while queued requests exist. `SalesInvoice.invoice_request`
+preserves the one-to-one source link; ordinary Sales Ledger invoice behavior and
+accounting rules remain authoritative after approval.
 Delivery additionally requires `add_salestransaction`. Existing permission formatting
 is preserved. Newly created permissions follow the existing executive grant hooks;
 ordinary staff grants must be assigned explicitly. Payments, partial payments and tax

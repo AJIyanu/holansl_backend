@@ -1,5 +1,7 @@
 import base64
 import json
+from datetime import date
+from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -13,6 +15,7 @@ from rest_framework.test import APIClient, APITestCase
 
 from crm.models import Party, PartyRole
 from crm.storage.base import DownloadedDocument, StoredDocument
+from accounts.models import Department, StaffProfile
 from . import analytics
 from .models import ItemActivity, ItemRequest, RequestedItem
 
@@ -62,9 +65,25 @@ class ProcurementItemRequestTests(APITestCase):
                 "communicate_waybill",
                 "add_itemverdict",
                 "view_itemverdict",
+                "add_invoicerequest",
+                "view_invoicerequest",
+                "approve_invoicerequest",
+                "cancel_invoicerequest",
+                "email_invoicerequest",
             ],
         )
         self.user.user_permissions.add(*permissions)
+        self.user.user_permissions.add(
+            *Permission.objects.filter(
+                content_type__app_label="ledger",
+                codename__in=[
+                    "view_salesledger",
+                    "view_salesinvoice",
+                    "add_salesinvoice",
+                    "confirm_salesinvoice",
+                ],
+            )
+        )
         self.client = APIClient()
         self.client.force_authenticate(self.user)
         self.crm_client = Party.objects.create(
@@ -121,6 +140,59 @@ class ProcurementItemRequestTests(APITestCase):
             activity = item.activities.get()
             self.assertEqual(activity.title_code, "REQUEST_RECEIVED")
             self.assertEqual(activity.status_result, RequestedItem.Status.OPEN)
+
+    @patch("procurement.notifications.notify")
+    def test_new_activity_notifies_procurement_and_management_by_dashboard_and_email(
+        self, notify_mock
+    ):
+        procurement = Department.objects.create(name="Procurement", code="PROC")
+        management = Department.objects.create(name="Management", code="MGT")
+        StaffProfile.objects.create(
+            user=self.user,
+            department=procurement,
+            job_title="Procurement Officer",
+            start_date=date(2026, 1, 1),
+            phone_number="08000000001",
+        )
+        manager = get_user_model().objects.create_user(
+            username="management.tester",
+            email="management.tester@holansl.com",
+            password="TestPassword123!",
+            is_staff=True,
+        )
+        StaffProfile.objects.create(
+            user=manager,
+            department=management,
+            job_title="Manager",
+            start_date=date(2026, 1, 1),
+            phone_number="08000000002",
+        )
+        created = self.client.post(
+            reverse("item-request-list"), self.request_payload(), format="json"
+        )
+        item_id = created.data["items"][0]["id"]
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                reverse("requested-item-activities", args=[item_id]),
+                {
+                    "category": "COMMENT",
+                    "title_code": "CUSTOM",
+                    "custom_title": "Supplier follow-up",
+                    "description": "Supplier confirmed availability.",
+                },
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        notify_mock.assert_called_once()
+        call = notify_mock.call_args.kwargs
+        self.assertEqual(
+            {spec.user.id for spec in call["recipients"]},
+            {self.user.id, manager.id},
+        )
+        self.assertEqual(tuple(call["channels"]), ("DASHBOARD", "EMAIL"))
+        self.assertIn(item_id, call["recipients"][0].action_url)
 
     def test_supplier_quote_multipart_items_and_empty_expiry(self):
         created = self.client.post(
@@ -514,6 +586,56 @@ class ProcurementItemRequestTests(APITestCase):
         )
 
         self.assertEqual(edited.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_item_can_be_reordered_from_any_status_without_changing_original_history(
+        self,
+    ):
+        created = self.client.post(
+            reverse("item-request-list"), self.request_payload(), format="json"
+        )
+        original = created.data["items"][0]
+        closed = self.client.post(
+            reverse("requested-item-change-status", args=[original["id"]]),
+            {"status": "CLOSED", "reason": "Original request completed."},
+            format="json",
+        )
+        self.assertEqual(closed.status_code, status.HTTP_200_OK)
+        original_activity_count = ItemActivity.objects.filter(
+            item_id=original["id"]
+        ).count()
+
+        reordered = self.client.post(
+            reverse("requested-item-reorder", args=[original["id"]]),
+            {
+                "client": str(self.crm_client.id),
+                "received_via": "WHATSAPP",
+                "items": [
+                    {
+                        "name": original["name"],
+                        "description": original["description"],
+                        "specification": "Updated reorder specification",
+                        "brand": "Danfoss",
+                        "quantity": "4",
+                        "unit": original["unit"],
+                        "urgency": "URGENT",
+                    }
+                ],
+            },
+            format="json",
+        )
+
+        self.assertEqual(reordered.status_code, status.HTTP_201_CREATED, reordered.data)
+        new_item = RequestedItem.objects.get(pk=reordered.data["items"][0]["id"])
+        self.assertEqual(str(new_item.reordered_from_id), original["id"])
+        self.assertEqual(new_item.status, RequestedItem.Status.OPEN)
+        self.assertEqual(
+            ItemActivity.objects.filter(item_id=original["id"]).count(),
+            original_activity_count,
+        )
+        activity = new_item.activities.get()
+        self.assertEqual(activity.title_code, "ITEM_REORDERED")
+        self.assertIn(original["code"], activity.description)
+        self.assertEqual(activity.metadata["reordered_from_id"], original["id"])
 
     def test_picture_add_and_remove_are_attributed_activities(self):
         created = self.client.post(
@@ -909,6 +1031,116 @@ class ProcurementItemRequestTests(APITestCase):
             reverse("purchase-order-detail", args=[po.data["id"]])
         )
         self.assertEqual(po_detail.data["status"], "ATTENTION_REQUIRED")
+
+    @patch("procurement.invoice_requests.notify")
+    def test_delivered_item_invoice_request_can_be_approved(self, notify_mock):
+        created = self.client.post(
+            reverse("item-request-list"), self.request_payload(), format="json"
+        )
+        item = created.data["items"][0]
+        po = self.client.post(
+            reverse("purchase-order-list"),
+            {
+                "client": str(self.crm_client.pk),
+                "client_reference": "CLIENT-PO-INVOICE",
+                "items": [{"item": item["id"], "quantity": "2", "unit_price": "2500"}],
+            },
+            format="json",
+        )
+        with patch(
+            "procurement.services.get_document_storage",
+            return_value=FakePictureStorage(),
+        ):
+            waybill = self.client.post(
+                reverse("waybill-list"),
+                {
+                    "client": str(self.crm_client.pk),
+                    "purchase_order": po.data["id"],
+                    "delivery_personnel": "Tolu Ade",
+                    "delivered_to": self.crm_client.display_name,
+                    "delivery_address": "Ibadan",
+                    "items": [{"item": item["id"], "quantity": "2"}],
+                },
+                format="json",
+            )
+        self.client.post(
+            reverse("item-verdict-list"),
+            {
+                "waybill_item": waybill.data["items"][0]["id"],
+                "verdict": "ACCEPTED",
+                "quantity": "2",
+            },
+            format="json",
+        )
+        eligible = self.client.get(reverse("invoice-request-eligible"))
+        self.assertEqual(eligible.status_code, status.HTTP_200_OK, eligible.data)
+        self.assertEqual(Decimal(eligible.data[0]["quantity"]), Decimal("2"))
+        request = self.client.post(
+            reverse("invoice-request-list"),
+            {
+                "item": item["id"],
+                "description": item["name"],
+                "quantity": "2",
+                "unit": item["unit"],
+                "unit_price": "2500",
+                "currency": "NGN",
+            },
+            format="json",
+        )
+        self.assertEqual(request.status_code, status.HTTP_201_CREATED, request.data)
+        approved = self.client.post(
+            reverse("invoice-request-approve", args=[request.data["id"]]),
+            {
+                "currency": "NGN",
+                "billed_to": self.crm_client.display_name,
+                "billing_address": "Ibadan",
+                "recipient_email": "accounts@acme.example",
+                "notes": "",
+                "discount_percent": "0",
+                "items": [
+                    {
+                        "description": item["name"],
+                        "quantity": "2",
+                        "unit": item["unit"],
+                        "unit_price": "2500",
+                    }
+                ],
+            },
+            format="json",
+        )
+        self.assertEqual(approved.status_code, status.HTTP_200_OK, approved.data)
+        self.assertEqual(approved.data["status"], "APPROVED")
+        self.assertTrue(approved.data["invoice_reference"])
+
+    def test_cancelled_invoice_request_requires_reason(self):
+        from .models import InvoiceRequest
+
+        created = self.client.post(
+            reverse("item-request-list"), self.request_payload(), format="json"
+        )
+        item = RequestedItem.objects.get(pk=created.data["items"][0]["id"])
+        row = InvoiceRequest.objects.create(
+            item=item,
+            client=self.crm_client,
+            client_name=self.crm_client.display_name,
+            description=item.name,
+            quantity=1,
+            unit=item.unit,
+            unit_price=100,
+            created_by=self.user,
+            created_by_name=self.user.username,
+        )
+        missing = self.client.post(
+            reverse("invoice-request-cancel", args=[row.id]), {}, format="json"
+        )
+        self.assertEqual(missing.status_code, status.HTTP_400_BAD_REQUEST)
+        cancelled = self.client.post(
+            reverse("invoice-request-cancel", args=[row.id]),
+            {"reason": "Client requested a correction."},
+            format="json",
+        )
+        self.assertEqual(cancelled.status_code, status.HTTP_200_OK, cancelled.data)
+        self.assertEqual(cancelled.data["status"], "CANCELLED")
 
     def test_analytics_cache_regenerates_after_activity_threshold(self):
         created = self.client.post(
