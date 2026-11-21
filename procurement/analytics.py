@@ -5,16 +5,22 @@ from zoneinfo import ZoneInfo
 from django.conf import settings
 from django.core.cache import cache
 from django.db.models import Count
-from django.db.models.functions import ExtractMonth
+from django.db.models.functions import ExtractMonth, TruncDay, TruncMonth, TruncWeek
 from django.utils import timezone
 from google import genai
 from google.genai import types
 from pydantic import BaseModel, Field
 
-from .models import ItemActivity, RequestedItem
+from .models import (
+    ClientQuotation,
+    ItemActivity,
+    ItemRequest,
+    ItemVerdict,
+    RequestedItem,
+)
 
 LAGOS = ZoneInfo("Africa/Lagos")
-CACHE_VERSION = "v1"
+CACHE_VERSION = "v2"
 RANGES = {"week", "month", "quarter", "year"}
 MONTHS = [
     "Jan",
@@ -82,6 +88,99 @@ def _open_at(moment):
     return sum(1 for activity in latest if activity.status_result == "OPEN")
 
 
+def _trend_buckets(period):
+    range_name = period["range"]
+    if range_name in {"week", "month"}:
+        trunc = TruncDay
+        cursor = period["date_from"]
+        step = timedelta(days=1)
+        label_format = "%a %d"
+        label_prefix = ""
+    elif range_name == "quarter":
+        trunc = TruncWeek
+        cursor = period["date_from"] - timedelta(days=period["date_from"].weekday())
+        step = timedelta(days=7)
+        label_format = "%d %b"
+        label_prefix = "Wk "
+    else:
+        trunc = TruncMonth
+        cursor = period["date_from"]
+        step = None
+        label_format = "%b"
+        label_prefix = ""
+
+    buckets = []
+    while cursor <= period["date_to"]:
+        buckets.append((cursor, f"{label_prefix}{cursor.strftime(label_format)}"))
+        if step:
+            cursor += step
+        else:
+            cursor = (
+                cursor.replace(year=cursor.year + 1, month=1, day=1)
+                if cursor.month == 12
+                else cursor.replace(month=cursor.month + 1, day=1)
+            )
+    return trunc, buckets
+
+
+def _bucket_counts(queryset, field, trunc):
+    rows = (
+        queryset.annotate(bucket=trunc(field, tzinfo=LAGOS))
+        .values("bucket")
+        .annotate(count=Count("id"))
+    )
+    return {row["bucket"].date(): row["count"] for row in rows}
+
+
+def _operational_trend(period):
+    trunc, buckets = _trend_buckets(period)
+    received = _bucket_counts(
+        RequestedItem.objects.filter(
+            request__received_at__gte=period["start"],
+            request__received_at__lte=period["end"],
+        ),
+        "request__received_at",
+        trunc,
+    )
+    delivered = _bucket_counts(
+        RequestedItem.objects.filter(
+            completed_at__gte=period["start"],
+            completed_at__lte=period["end"],
+            status=RequestedItem.Status.DELIVERED,
+        ),
+        "completed_at",
+        trunc,
+    )
+    quotations = _bucket_counts(
+        ClientQuotation.objects.filter(
+            issued_at__gte=period["start"],
+            issued_at__lte=period["end"],
+        ),
+        "issued_at",
+        trunc,
+    )
+    rejected = _bucket_counts(
+        ItemVerdict.objects.filter(
+            verdict=ItemVerdict.Verdict.REJECTED,
+            occurred_at__gte=period["start"],
+            occurred_at__lte=period["end"],
+        ),
+        "occurred_at",
+        trunc,
+    )
+    return [
+        {
+            "date": day.isoformat(),
+            "label": label,
+            "delivered": delivered.get(day, 0),
+            "received": received.get(day, 0),
+            "quotations_issued": quotations.get(day, 0),
+            "rejected": rejected.get(day, 0),
+        }
+        for day, label in buckets
+    ]
+
+
 def calculate_analytics(range_name):
     period = analytics_period(range_name)
     items = RequestedItem.objects.filter(
@@ -97,6 +196,26 @@ def calculate_analytics(range_name):
     suspended = by_status.get("SUSPENDED", 0)
     closed = by_status.get("CLOSED", 0)
     delivered = by_status.get("DELIVERED", 0)
+
+    week_start = timezone.localdate() - timedelta(days=timezone.localdate().weekday())
+    week_start_at = _aware(week_start)
+    aged_cutoff = timezone.now() - timedelta(days=30)
+    new_requests_this_week = ItemRequest.objects.filter(
+        received_at__gte=week_start_at
+    ).count()
+    aged_open_items = (
+        RequestedItem.objects.filter(request__received_at__lt=aged_cutoff)
+        .exclude(
+            status__in=[RequestedItem.Status.CLOSED, RequestedItem.Status.DELIVERED]
+        )
+        .count()
+    )
+    period_deliveries = RequestedItem.objects.filter(
+        status=RequestedItem.Status.DELIVERED,
+        completed_at__gte=period["start"],
+        completed_at__lte=period["end"],
+    ).count()
+    delivery_ratio = round(period_deliveries / total * 100, 2) if total else 0.0
 
     now = timezone.now()
     current_week_open = RequestedItem.objects.filter(status="OPEN").count()
@@ -202,6 +321,14 @@ def calculate_analytics(range_name):
             "previous_week": previous_week_open,
             "difference": change,
             "percent_change": percent_change,
+        },
+        "operational_trend": _operational_trend(period),
+        "procurement_snapshot": {
+            "new_requests_this_week": new_requests_this_week,
+            "aged_open_items": aged_open_items,
+            "received_items": total,
+            "delivered_items": period_deliveries,
+            "delivery_ratio_percent": delivery_ratio,
         },
         "delivered_by_month": [
             {"month": MONTHS[month - 1], "count": delivered_by_month.get(month, 0)}

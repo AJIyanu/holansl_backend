@@ -778,6 +778,30 @@ class ProcurementItemRequestTests(APITestCase):
         self.assertEqual(first.data["cards"]["received"], 2)
         self.assertEqual(first.data["cards"]["active"], 1)
         self.assertEqual(first.data["cards"]["delivered"], 1)
+        self.assertEqual(
+            set(first.data["operational_trend"][0]),
+            {
+                "date",
+                "label",
+                "delivered",
+                "received",
+                "quotations_issued",
+                "rejected",
+            },
+        )
+        self.assertEqual(
+            sum(row["received"] for row in first.data["operational_trend"]), 2
+        )
+        self.assertEqual(
+            sum(row["delivered"] for row in first.data["operational_trend"]), 1
+        )
+        self.assertEqual(
+            first.data["procurement_snapshot"]["new_requests_this_week"], 1
+        )
+        self.assertEqual(first.data["procurement_snapshot"]["delivered_items"], 1)
+        self.assertEqual(
+            first.data["procurement_snapshot"]["delivery_ratio_percent"], 50.0
+        )
         self.assertEqual(len(first.data["delivered_by_month"]), 12)
         self.assertEqual(first.data["received_by_client"][0]["count"], 2)
         self.assertFalse(first.data["cache"]["hit"])

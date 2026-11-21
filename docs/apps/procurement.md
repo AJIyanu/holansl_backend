@@ -68,6 +68,17 @@ received-to-delivered ratios per client. Calendar week, month, quarter and year
 ranges use Africa/Lagos time. Active means `OPEN` only; not delivered includes
 open, suspended and closed items.
 
+The same response supplies the dashboard Overview with a zero-filled operational
+trend. Week and month use daily buckets, quarter uses calendar-week buckets and
+year uses monthly buckets. It counts delivered items by completion date, received
+items by request receipt date, issued client-quotation documents once by
+`ClientQuotation.issued_at`, and rejected item-verdict records by occurrence date.
+Its Procurement snapshot includes parent requests received since Monday, items
+received more than 30 days ago whose current status is neither `CLOSED` nor
+`DELIVERED`, and the selected-period received/delivered counts and ratio. Tracker
+quotation activities remain audit evidence and are not counted because one issued
+quotation can append activities to multiple items.
+
 `GET /procurement/analytics/ai-insight/?range=...` sends aggregate, anonymised
 operational figures to the configured Google AI provider. Rules and AI results use
 separate cache entries with the same age/new-activity threshold invalidation model
