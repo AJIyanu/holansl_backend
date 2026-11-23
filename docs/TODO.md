@@ -143,7 +143,8 @@ approved for rebuilding. No application database was queried during this review.
 - [x] Tax Ledger: VAT timing at payment or delivery first; input/output VAT,
   client WHT assets, supplier WHT liabilities, input-credit classification, remittance
   approvals, manual CIT assessments/WHT offsets, versioned policies and CSV export.
-  Historical backfill command and reviewed delivery-opening workflow are built.
+  Historical review and the reviewed delivery-opening workflow are built. The
+  general historical backfill management command was retired on 2026-11-23.
 - [x] Printable frozen Reconciliation and Statements for parties/staff, selected
   ranges/currencies, prior/running/closing balances. New party statements include
   goods, VAT, WHT and actual cash. Existing snapshots remain unchanged.
@@ -207,9 +208,9 @@ existing Staff Ledger retirement/approval engine; do not duplicate financial tab
   intended environment; logs document generation/test execution, not live rollout.
   Do not infer pending/applied status from source or rerun the historical reset.
 - [ ] Verify relevant staff permissions through existing account administration.
-- [ ] Preview historical tax links; review discrepancies, apply authorized backfill
-  and approve necessary delivery VAT openings. Command availability is implemented;
-  production execution was not confirmed by this review.
+- [ ] Review historical tax links and discrepancies through the permissioned history
+  API, define any required correction as a separately approved operator procedure,
+  and approve necessary delivery VAT openings.
 - [ ] Complete authenticated desktop/mobile/print acceptance testing, especially
   approval boundaries, receipts, financial corrections and reconciliation totals.
 - [ ] Separately verify real document-email delivery and private evidence uploads

@@ -35,18 +35,8 @@ python manage.py verify_crm_integrity
 
 ## Before production migration
 
-Take a PostgreSQL or Supabase database backup.
-
-The Stage 1 ZIP backup is useful for application-level inspection but is not a replacement for a complete database backup.
-
-Run:
-
-```bash
-python manage.py prepare_crm_rebuild --dry-run
-python manage.py prepare_crm_rebuild --backup-only
-```
-
-Do not use destructive purge mode after the final cutover. Protected Procurement and Ledger relationships are expected to prevent it.
+Take a complete PostgreSQL or Supabase database backup. The retired application-level
+CRM rebuild/purge command is no longer exposed.
 
 ## Required sensitive-data settings
 
@@ -157,7 +147,6 @@ Run tests:
 
 ```bash
 python manage.py test \
-  accounts.test_prepare_crm_rebuild \
   crm.test_models \
   crm.test_api \
   crm.test_sensitive_documents \
@@ -299,7 +288,6 @@ Run the full CRM-related test suite:
 
 ```bash
 python manage.py test \
-  accounts.test_prepare_crm_rebuild \
   crm.test_models \
   crm.test_api \
   crm.test_sensitive_documents \

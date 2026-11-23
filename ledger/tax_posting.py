@@ -101,7 +101,7 @@ def require_history(document, side):
     keys = [f"payment:{pk}" for pk in rows.values_list("pk", flat=True)]
     if keys and TaxEntry.objects.filter(source_key__in=keys).count() != len(keys):
         raise ValidationError(
-            "Existing linked payments need the tax backfill before this operation. Run its preview and review the results."
+            "Existing linked payments require historical review before this operation. Review the permissioned Tax Ledger history and follow a separately approved correction procedure."
         )
 
 

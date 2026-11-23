@@ -127,8 +127,17 @@ DJANGO_SETTINGS_MODULE=holansladminservices.test_settings \
 python manage.py test --keepdb
 ```
 
-Normal commands such as `python manage.py runserver` continue using the
-regular settings and `DATABASE_URL`.
+Local development uses a different PostgreSQL database from tests:
+
+```bash
+APP_ENV=development \
+LOCAL_DEV_DATABASE_URL=postgresql://USER:PASSWORD@localhost:5432/holan_dev \
+./scripts/setup_dev_database.sh
+```
+
+Production uses `APP_ENV=production` and `DATABASE_URL`. See
+`docs/operations/DATABASE_ENVIRONMENTS.md` for the Render fresh-database bootstrap,
+storage verification and production-snapshot policy.
 
 ---
 

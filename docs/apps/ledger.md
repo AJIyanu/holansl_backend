@@ -809,13 +809,10 @@ cash entries cannot be edited/voided independently.
 ### Rollout and historical records
 
 Review and run migrations through 0028 explicitly on the application database.
-Then preview `python manage.py backfill_tax_ledger`. After review, an operator may
-run `python manage.py backfill_tax_ledger --apply`. Apply links historical payments
-and corrections, checks immutable journals for discrepancies and is repeatable;
-it does not repost cash, alter old journals or auto-approve delivery gaps. Use
-approved OPENING requests for those gaps after historical links are complete.
-Backfill discrepancy errors roll back the entire link operation. Run during a
-maintenance window because it serialises against financial posting.
+Historical tax review remains available through the permissioned read-only history
+API. Any future historical data correction requires a separately designed,
+reviewed and approved operator procedure; no general backfill management command
+is exposed.
 
 No electronic invoicing, WHT certificates or live authority submission is included.
 The user-selected VAT timing is an operational policy, not a declaration of full

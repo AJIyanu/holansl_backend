@@ -380,34 +380,6 @@ POST /tasks/reminders/{reminder-id}/cancel/
 }
 ```
 
-# 15. Run the integrity check
-
-First inspect without changing anything:
-
-```bash
-python manage.py check_task_integrity
-```
-
-If it reports historical inconsistencies:
-
-```bash
-python manage.py check_task_integrity --fix
-```
-
-Then run it once more:
-
-```bash
-python manage.py check_task_integrity
-```
-
-Expected:
-
-```text
-Task integrity check passed.
-```
-
----
-
 # 16. Run the complete backend checks
 
 ```bash
@@ -532,7 +504,7 @@ The task backend now covers:
 * personal task reminders;
 * dashboard-only free-deployment behaviour;
 * optional scheduled email and WhatsApp architecture;
-* integrity repair;
+* lifecycle integrity protections;
 * hard-delete protection;
 * model, service and API tests;
 * OpenAPI documentation.

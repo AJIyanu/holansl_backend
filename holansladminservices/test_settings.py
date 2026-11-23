@@ -4,6 +4,13 @@ import os
 
 import dj_database_url
 
+# Ensure importing base settings can never select the production database.
+os.environ["APP_ENV"] = "test"
+os.environ.setdefault(
+    "LOCAL_TEST_DATABASE_URL",
+    "postgresql://Holan:test_password@localhost:5432/holan_test",
+)
+
 from .settings import *  # noqa: F403
 
 

@@ -14,6 +14,7 @@ from pathlib import Path
 import os
 from dotenv import load_dotenv
 import dj_database_url
+from django.core.exceptions import ImproperlyConfigured
 
 load_dotenv()
 
@@ -92,23 +93,60 @@ TEMPLATES = [
 WSGI_APPLICATION = "holansladminservices.wsgi.application"
 
 
-# Database
+# Environment and database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
-DATABASES = {
-    "default": dj_database_url.config(
-        default="sqlite:///db.sqlite3",  # Fallback for local development
-        conn_max_age=600,
-    ),
-    "test": {
-        "ENGINE": "django.db.backends.postgresql",
-        "NAME": "holan_test",
-        "USER": "Holan",
-        "PASSWORD": "HolanTestDB",
-        "HOST": "localhost",
-        "PORT": "5432",
-    },
-}
+APP_ENV = os.getenv("APP_ENV", "production").strip().lower()
+APP_ENV = {"prod": "production", "dev": "development"}.get(APP_ENV, APP_ENV)
+
+if APP_ENV not in {"production", "development", "test"}:
+    raise ImproperlyConfigured(
+        "APP_ENV must be production/prod, development/dev, or test."
+    )
+
+
+def database_from_url(variable_name, *, conn_max_age):
+    database_url = os.getenv(variable_name, "").strip()
+    if not database_url:
+        raise ImproperlyConfigured(f"{variable_name} must be configured for {APP_ENV}.")
+    return dj_database_url.parse(database_url, conn_max_age=conn_max_age)
+
+
+if APP_ENV == "production":
+    default_database = database_from_url("DATABASE_URL", conn_max_age=600)
+    if default_database["ENGINE"] != "django.db.backends.postgresql":
+        raise ImproperlyConfigured("Production DATABASE_URL must use PostgreSQL.")
+    if default_database.get("HOST", "").lower() in {
+        "localhost",
+        "127.0.0.1",
+        "::1",
+    }:
+        raise ImproperlyConfigured("Production DATABASE_URL must not target localhost.")
+elif APP_ENV == "development":
+    default_database = database_from_url("LOCAL_DEV_DATABASE_URL", conn_max_age=0)
+    if default_database["ENGINE"] != "django.db.backends.postgresql":
+        raise ImproperlyConfigured("LOCAL_DEV_DATABASE_URL must use PostgreSQL.")
+    if default_database.get("HOST", "").lower() not in {
+        "localhost",
+        "127.0.0.1",
+        "::1",
+    }:
+        raise ImproperlyConfigured("Development database must be on the local machine.")
+
+    test_database = dj_database_url.parse(
+        os.getenv(
+            "LOCAL_TEST_DATABASE_URL",
+            "postgresql://Holan:test_password@localhost:5432/holan_test",
+        )
+    )
+    if default_database["NAME"] == test_database["NAME"]:
+        raise ImproperlyConfigured(
+            "Development and test databases must have different names."
+        )
+else:
+    default_database = database_from_url("LOCAL_TEST_DATABASE_URL", conn_max_age=0)
+
+DATABASES = {"default": default_database}
 
 
 # Password validation

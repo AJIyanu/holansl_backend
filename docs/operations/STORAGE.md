@@ -27,3 +27,9 @@ No schema or data migration accompanies this change. Existing validation, size
 limits, checksum checks, upload compensation and soft-deleted metadata remain.
 Provider failure and routing tests use mocks; live write acceptance needs separate
 authorization. Tests: crm.test_storage_routing and crm.test_sensitive_documents.
+
+Production builds run `verify_supabase_storage` after database bootstrap. This
+read-only check fails the build if credentials are missing, the bucket cannot be
+read or Supabase does not explicitly report it as private. Operators still create
+the private bucket in Supabase; the application never creates it or changes its
+visibility.

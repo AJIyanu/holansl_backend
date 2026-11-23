@@ -1,8 +1,5 @@
 from datetime import timedelta
-from io import StringIO
-
 from django.core.exceptions import ValidationError
-from django.core.management import call_command
 from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -16,7 +13,6 @@ from notifications.constants import (
 
 from tasks.constants import (
     TaskActivityType,
-    TaskStatus,
 )
 from tasks.models import (
     Task,
@@ -185,40 +181,6 @@ class TaskHardeningTests(TaskModelTestCase):
         self.assertEqual(
             response.status_code,
             status.HTTP_400_BAD_REQUEST,
-        )
-
-    def test_integrity_command_cancels_invalid_reminder(
-        self,
-    ):
-        task = self.create_personal_task()
-
-        reminder = create_task_reminder(
-            task=task,
-            user=self.user,
-            remind_at=(timezone.now() + timedelta(minutes=30)),
-            channels=[NotificationChannel.DASHBOARD],
-        )
-
-        Task.objects.filter(pk=task.pk).update(
-            status=TaskStatus.COMPLETED,
-            completed_at=timezone.now(),
-        )
-
-        output = StringIO()
-
-        call_command(
-            "check_task_integrity",
-            "--fix",
-            stdout=output,
-        )
-
-        reminder.refresh_from_db()
-
-        self.assertIsNotNone(reminder.cancelled_at)
-
-        self.assertIn(
-            "Task integrity issues repaired",
-            output.getvalue(),
         )
 
     def test_invalid_activity_type_returns_error(
