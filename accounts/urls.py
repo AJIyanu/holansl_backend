@@ -2,9 +2,12 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import (
     AuditLogViewSet,
+    AuthenticationSessionViewSet,
     CurrentUserView,
     DepartmentLeadershipViewSet,
     DepartmentViewSet,
+    EmailMFAVerifyView,
+    EmailMFAResendView,
     ForgotPasswordView,
     LoginActivityViewSet,
     LogoutView,
@@ -27,6 +30,9 @@ router.register(
     DepartmentLeadershipViewSet,
     basename="department-leadership",
 )
+router.register(
+    r"sessions", AuthenticationSessionViewSet, basename="authentication-session"
+)
 router.register(r"roles", RoleViewSet)
 router.register(r"permissions", PermissionViewSet)
 router.register(
@@ -47,6 +53,8 @@ urlpatterns = [
     path("", include(router.urls)),
     path("me/", CurrentUserView.as_view(), name="current-user"),
     path("logout/", LogoutView.as_view(), name="logout"),
+    path("mfa/verify/", EmailMFAVerifyView.as_view(), name="email-mfa-verify"),
+    path("mfa/resend/", EmailMFAResendView.as_view(), name="email-mfa-resend"),
     path(
         "password-reset/verify/",
         PasswordResetVerifyView.as_view(),

@@ -23,11 +23,11 @@ class ExecutivePermissionTests(APITestCase):
         self.ceo = Role.objects.create(name="CEO")
         self.cto = Group.objects.create(name="CTO")
         self.user = get_user_model().objects.create_user(
-            username="exec", email="exec@example.invalid", is_staff=True
+            username="exec", email="exec@holansl.com", is_staff=True
         )
         self.user.groups.add(self.ceo)
         self.target = get_user_model().objects.create_user(
-            username="target", email="target@example.invalid", is_staff=True
+            username="target", email="target@holansl.com", is_staff=True
         )
         self.content_type = ContentType.objects.get_for_model(get_user_model())
         self.addCleanup(_migration_permissions.clear)

@@ -2,6 +2,13 @@
 
 ## Authentication and onboarding
 
+Interactive login is email-only and requires a second factor delivered to the
+account email. Ordinary accounts must use the exact `holansl.com` domain. The only
+external exception is superuser `aderemijoseph@live.com`; the address alone never
+grants the exception. Password success creates only a short-lived MFA challenge.
+JWTs are issued after OTP verification and remain bound to a revocable server-side
+authentication session. Login and OTP failures are rate-limited by account and IP.
+
 The configured default/temporary staff password comes from the environment, not
 from a hard-coded new value. A new user must not enter the dashboard with that
 password: direct the user into password update/reset first and enforce the block

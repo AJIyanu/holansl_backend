@@ -27,7 +27,7 @@ class PasswordEmailTests(APITestCase):
     def setUp(self):
         self.user = get_user_model().objects.create_user(
             username="reset-staff",
-            email="staff@example.invalid",
+            email="staff@holansl.com",
             password="Initial-password-987!",
             first_name="<script>bad</script>",
         )
@@ -83,7 +83,7 @@ class PasswordEmailTests(APITestCase):
         self.user.save(update_fields=["must_change_password"])
         response = self.client.post(
             "/token/",
-            {"username": self.user.username, "password": "Initial-password-987!"},
+            {"username": self.user.email, "password": "Initial-password-987!"},
         )
         self.assertEqual(response.status_code, 400)
         self.assertEqual(str(response.data["code"][0]), "password_change_required")
@@ -103,7 +103,7 @@ class PasswordEmailTests(APITestCase):
                 path = "/token/" if onboarding else "/account/password-reset/request/"
                 data = (
                     {
-                        "username": self.user.username,
+                        "username": self.user.email,
                         "password": "Initial-password-987!",
                     }
                     if onboarding

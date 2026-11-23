@@ -13,7 +13,7 @@ from rest_framework.permissions import (
 )
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework_simplejwt.views import TokenObtainPairView
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from .audit_services import (
     get_cached_audit_ai_insight,
@@ -23,6 +23,7 @@ from .audit_services import (
 )
 from .models import (
     AuditLog,
+    AuthenticationSession,
     Department,
     DepartmentLeadership,
     Role,
@@ -38,16 +39,20 @@ from .permissions import (
 )
 from .serializers import (
     AuditLogSerializer,
+    AuthenticationSessionSerializer,
     CurrentUserSerializer,
     DepartmentLeadershipReadSerializer,
     DepartmentLeadershipWriteSerializer,
     DepartmentSerializer,
+    EmailMFAVerifySerializer,
+    EmailMFAResendSerializer,
     ForgotPasswordSerializer,
     HolanTokenObtainPairSerializer,
     PasswordResetConfirmSerializer,
     PasswordResetVerifySerializer,
     PermissionSerializer,
     RoleSerializer,
+    SessionTokenRefreshSerializer,
     StaffProfileReadSerializer,
     StaffProfileWriteSerializer,
     UserSummarySerializer,
@@ -159,6 +164,45 @@ class HolanTokenObtainPairView(TokenObtainPairView):
     serializer_class = HolanTokenObtainPairSerializer
 
 
+class EmailMFAVerifyView(APIView):
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = EmailMFAVerifySerializer(
+            data=request.data, context={"request": request}
+        )
+        serializer.is_valid(raise_exception=True)
+        session = serializer.validated_data["session"]
+        create_audit_log(
+            user=session.user,
+            event_category=AuditLog.EventCategory.AUTH,
+            event_type=AuditLog.EventType.LOGIN_SUCCESS,
+            status=AuditLog.EventStatus.SUCCESS,
+            username_attempted=session.user.email,
+            request=request,
+            metadata={"session_id": str(session.id), "method": "email_otp"},
+        )
+        return Response(serializer.validated_data["tokens"], status=status.HTTP_200_OK)
+
+
+class EmailMFAResendView(APIView):
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = EmailMFAResendSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        return Response(
+            {"detail": "If the challenge is still valid, a new code was sent."},
+            status=status.HTTP_200_OK,
+        )
+
+
+class SessionTokenRefreshView(TokenRefreshView):
+    serializer_class = SessionTokenRefreshSerializer
+
+
 class LogoutView(APIView):
     authentication_classes = []
     permission_classes = [AllowAny]
@@ -216,6 +260,41 @@ class LogoutView(APIView):
             {"detail": "Logout successful."},
             status=status.HTTP_200_OK,
         )
+
+
+class AuthenticationSessionViewSet(viewsets.ReadOnlyModelViewSet):
+    serializer_class = AuthenticationSessionSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return AuthenticationSession.objects.filter(user=self.request.user).order_by(
+            "-last_seen_at"
+        )
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        token = getattr(self.request, "auth", None)
+        context["current_session_id"] = token.get("sid") if token else None
+        return context
+
+    def destroy(self, request, *args, **kwargs):
+        session = self.get_object()
+        if session.revoked_at is None:
+            session.revoked_at = timezone.now()
+            session.revoke_reason = "user_revoked"
+            session.save(update_fields=["revoked_at", "revoke_reason"])
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(detail=False, methods=["post"], url_path="revoke-others")
+    def revoke_others(self, request):
+        token = getattr(request, "auth", None)
+        current_session_id = token.get("sid") if token else None
+        AuthenticationSession.objects.filter(
+            user=request.user, revoked_at__isnull=True
+        ).exclude(id=current_session_id).update(
+            revoked_at=timezone.now(), revoke_reason="user_revoked_others"
+        )
+        return Response({"detail": "Other sessions were signed out."})
 
 
 class PasswordResetVerifyView(APIView):

@@ -50,14 +50,27 @@ serializer validation and service rules can impose additional restrictions.
 | POST | `/account/password-reset/confirm/` | `PasswordResetConfirmView`: post | AllowAny |
 | GET | `/account/health/` | `health_check`: get | AllowAny |
 | POST | `/account/password-reset/request/` | `ForgotPasswordView`: post | AllowAny |
-| POST | `/token/` | `HolanTokenObtainPairView`: post | Token endpoint (credentials/refresh token) |
-| POST | `/token/refresh/` | `TokenRefreshView`: post | Token endpoint (credentials/refresh token) |
+| POST | `/token/` | `HolanTokenObtainPairView`: post | Email/password stage; creates an email MFA challenge |
+| POST | `/account/mfa/verify/` | `EmailMFAVerifyView`: post | Verify one-time email code and issue session-bound tokens |
+| POST | `/account/mfa/resend/` | `EmailMFAResendView`: post | Replace a challenge code subject to cooldown and resend limits |
+| GET, DELETE | `/account/sessions/{id}/` | `AuthenticationSessionViewSet` | List or revoke the user's own managed sessions |
+| POST | `/account/sessions/revoke-others/` | `AuthenticationSessionViewSet` | Revoke all of the user's sessions except the current session |
+| POST | `/token/refresh/` | `SessionTokenRefreshView`: post | Refresh only an active managed session |
 
 ## Contracts and authorization
 
-- Token obtain accepts username/password credentials through the configured
-  email-or-username backend; successful response contains access and refresh JWTs.
-  Refresh accepts {"refresh":"TOKEN"} and returns an access token.
+- Token obtain accepts email/password only. Authentication is limited to active
+  `@holansl.com` accounts, plus the exact `aderemijoseph@live.com` address only
+  when that account is a superuser. A valid password returns a five-minute email
+  MFA challenge, never tokens. The six-digit code is hashed, single-use and limited
+  to five attempts; resend has a 30-second cooldown and three-replacement limit.
+  Successful verification creates a 24-hour managed session and issues a 15-minute
+  access token plus 24-hour refresh token carrying that session ID.
+- Five failed passwords in 15 minutes block the account key for 15 minutes; 20
+  failures from one IP block that IP key for one hour. Responses remain neutral.
+  Refresh and authenticated requests reject revoked or expired managed sessions.
+- Login OTP email uses the sensitive immediate email-only service. Codes are not
+  persisted in notification/outbox records, audit metadata, API responses or URLs.
 - Logout accepts {"access":"TOKEN","refresh":"TOKEN"}. Both JWTs must be
   signed, unexpired, have their expected token types and belong to the same user.
   A successful request blacklists both JWT IDs, immediately rejects the access

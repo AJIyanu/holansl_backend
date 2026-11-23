@@ -2,12 +2,15 @@ from datetime import UTC, datetime
 
 from django.contrib.auth import get_user_model
 from django.db import transaction
+from django.utils import timezone
 from rest_framework_simplejwt.settings import api_settings
 from rest_framework_simplejwt.token_blacklist.models import (
     BlacklistedToken,
     OutstandingToken,
 )
 from rest_framework_simplejwt.tokens import TokenError, UntypedToken
+
+from .models import AuthenticationSession
 
 
 class LogoutTokenError(ValueError):
@@ -69,7 +72,16 @@ def revoke_token_pair(*, access, refresh):
     refresh_token = _validated_payload(refresh, "refresh")
     user = _resolve_user(access_token, refresh_token)
 
+    access_session_id = access_token.get("sid")
+    refresh_session_id = refresh_token.get("sid")
+    if not access_session_id or access_session_id != refresh_session_id:
+        raise LogoutTokenError("Access and refresh sessions do not match.")
+
     _blacklist_token(access_token, user)
     _blacklist_token(refresh_token, user)
+
+    AuthenticationSession.objects.filter(
+        id=access_session_id, user=user, revoked_at__isnull=True
+    ).update(revoked_at=timezone.now(), revoke_reason="logout")
 
     return user

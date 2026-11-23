@@ -1,12 +1,29 @@
-from rest_framework import serializers
+from django.conf import settings
+from django.contrib.auth import authenticate, get_user_model
 from django.contrib.auth.models import Permission
-from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+from django.contrib.auth.password_validation import validate_password
+from django.db.models import Q
+from django.utils import timezone
+from rest_framework import serializers
 from rest_framework.exceptions import AuthenticationFailed, ValidationError
-from django.contrib.auth import get_user_model
+from rest_framework_simplejwt.serializers import (
+    TokenObtainPairSerializer,
+    TokenRefreshSerializer,
+)
+from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import User, StaffProfile, Department, Role, AuditLog, PasswordResetCode
+from .auth_security import (
+    company_email_is_allowed,
+    create_email_challenge,
+    login_email_is_allowed,
+    record_login_failure,
+    resend_email_challenge,
+    throttle_is_blocked,
+    verify_email_challenge,
+)
 from .models import (
     AuditLog,
+    AuthenticationSession,
     Department,
     DepartmentLeadership,
     PasswordResetCode,
@@ -14,13 +31,6 @@ from .models import (
     StaffProfile,
     User,
 )
-from django.db.models import Q
-
-from django.conf import settings
-from django.contrib.auth import get_user_model
-from django.contrib.auth.password_validation import validate_password
-from django.utils import timezone
-
 from .utils import (
     create_audit_log,
     create_password_reset_code,
@@ -80,13 +90,24 @@ def get_user_agent(request):
 class HolanTokenObtainPairSerializer(TokenObtainPairSerializer):
     def validate(self, attrs):
         request = self.context.get("request")
-        username = attrs.get(self.username_field, "")
+        username = attrs.get(self.username_field, "").strip()
+        password = attrs.get("password", "")
+        ip_address = get_client_ip(request)
+        generic_error = "No active account found with the given credentials"
 
-        try:
-            data = super().validate(attrs)
-        except AuthenticationFailed as exc:
-            self.log_failed_login(request=request, username=username, error=str(exc))
-            raise exc
+        if throttle_is_blocked(email=username, ip_address=ip_address):
+            self.log_failed_login(request=request, username=username, error="throttled")
+            raise AuthenticationFailed(generic_error)
+
+        self.user = authenticate(request=request, username=username, password=password)
+        if (
+            self.user is None
+            or username.casefold() != self.user.email.casefold()
+            or not login_email_is_allowed(self.user)
+        ):
+            record_login_failure(email=username, ip_address=ip_address)
+            self.log_failed_login(request=request, username=username, error="invalid")
+            raise AuthenticationFailed(generic_error)
 
         if self.user.must_change_password:
             self.handle_default_password_login(request=request, username=username)
@@ -98,20 +119,24 @@ class HolanTokenObtainPairSerializer(TokenObtainPairSerializer):
                 }
             )
 
-        create_audit_log(
-            user=self.user,
-            event_category=AuditLog.EventCategory.AUTH,
-            event_type=AuditLog.EventType.LOGIN_SUCCESS,
-            status=AuditLog.EventStatus.SUCCESS,
-            username_attempted=username,
-            request=request,
-            metadata={
-                "path": request.path if request else "",
-                "method": request.method if request else "",
-            },
-        )
+        try:
+            challenge = create_email_challenge(self.user, request)
+        except Exception:
+            raise serializers.ValidationError(
+                {"detail": "Sign-in code could not be sent. Please try again."}
+            ) from None
 
-        return data
+        return {
+            "mfa_required": True,
+            "challenge_id": str(challenge.id),
+            "expires_in": 300,
+            "email_hint": self._email_hint(self.user.email),
+        }
+
+    @staticmethod
+    def _email_hint(email):
+        local, domain = email.split("@", 1)
+        return f"{local[:2]}{'*' * max(2, len(local) - 2)}@{domain}"
 
     def log_failed_login(self, request, username, error):
         UserModel = get_user_model()
@@ -203,6 +228,79 @@ class HolanTokenObtainPairSerializer(TokenObtainPairSerializer):
                 "purpose": reset_code.purpose,
             },
         )
+
+
+class EmailMFAVerifySerializer(serializers.Serializer):
+    challenge_id = serializers.UUIDField()
+    code = serializers.RegexField(r"^\d{6}$", write_only=True)
+
+    def validate(self, attrs):
+        session, tokens = verify_email_challenge(
+            challenge_id=attrs["challenge_id"],
+            code=attrs["code"],
+            request=self.context.get("request"),
+        )
+        if not session:
+            raise serializers.ValidationError(
+                {"detail": "The sign-in code is invalid or expired."}
+            )
+        attrs["session"] = session
+        attrs["tokens"] = tokens
+        return attrs
+
+
+class EmailMFAResendSerializer(serializers.Serializer):
+    challenge_id = serializers.UUIDField()
+
+    def validate(self, attrs):
+        try:
+            accepted = resend_email_challenge(attrs["challenge_id"])
+        except Exception:
+            accepted = False
+        if not accepted:
+            raise serializers.ValidationError(
+                {"detail": "A new code cannot be sent yet. Please wait and try again."}
+            )
+        return attrs
+
+
+class SessionTokenRefreshSerializer(TokenRefreshSerializer):
+    def validate(self, attrs):
+        refresh = RefreshToken(attrs["refresh"])
+        session_id = refresh.get("sid")
+        session = AuthenticationSession.objects.filter(
+            id=session_id,
+            user_id=refresh.get("user_id"),
+            revoked_at__isnull=True,
+            expires_at__gt=timezone.now(),
+        ).first()
+        if not session:
+            raise AuthenticationFailed("Session has expired.", code="session_expired")
+        session.last_seen_at = timezone.now()
+        session.save(update_fields=["last_seen_at"])
+        return super().validate(attrs)
+
+
+class AuthenticationSessionSerializer(serializers.ModelSerializer):
+    current = serializers.SerializerMethodField()
+    active = serializers.BooleanField(source="is_active", read_only=True)
+
+    class Meta:
+        model = AuthenticationSession
+        fields = (
+            "id",
+            "ip_address",
+            "user_agent",
+            "created_at",
+            "last_seen_at",
+            "expires_at",
+            "revoked_at",
+            "active",
+            "current",
+        )
+
+    def get_current(self, obj):
+        return str(obj.id) == self.context.get("current_session_id")
 
 
 class RoleSummarySerializer(serializers.ModelSerializer):
@@ -313,6 +411,19 @@ class UserWriteSerializer(serializers.ModelSerializer):
         mutable_data.pop("password", None)
 
         return super().to_internal_value(mutable_data)
+
+    def validate_email(self, value):
+        normalized = value.strip().casefold()
+        if not company_email_is_allowed(normalized):
+            if not (
+                self.instance
+                and self.instance.is_superuser
+                and normalized == "aderemijoseph@live.com"
+            ):
+                raise serializers.ValidationError(
+                    "Staff email addresses must use the holansl.com domain."
+                )
+        return normalized
 
     def update(self, instance, validated_data):
         roles = validated_data.pop("groups", None)
@@ -425,6 +536,10 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
         user.set_password(password)
         user.must_change_password = False
         user.save(update_fields=["password", "must_change_password"])
+
+        AuthenticationSession.objects.filter(user=user, revoked_at__isnull=True).update(
+            revoked_at=timezone.now(), revoke_reason="password_reset"
+        )
 
         reset_code.used_at = timezone.now()
         reset_code.save(update_fields=["used_at"])
@@ -603,6 +718,14 @@ class UserSerializer(serializers.ModelSerializer):
 
         return user
 
+    def validate_email(self, value):
+        normalized = value.strip().casefold()
+        if not company_email_is_allowed(normalized):
+            raise serializers.ValidationError(
+                "Staff email addresses must use the holansl.com domain."
+            )
+        return normalized
+
     def update(self, instance, validated_data):
         """
         Custom update method to handle password hashing.
@@ -621,6 +744,14 @@ class UserCreateNestedSerializer(serializers.ModelSerializer):
         extra_kwargs = {
             "password": {"write_only": True, "style": {"input_type": "password"}}
         }
+
+    def validate_email(self, value):
+        normalized = value.strip().casefold()
+        if not company_email_is_allowed(normalized):
+            raise serializers.ValidationError(
+                "Staff email addresses must use the holansl.com domain."
+            )
+        return normalized
 
 
 class StaffProfileWriteSerializer(serializers.ModelSerializer):

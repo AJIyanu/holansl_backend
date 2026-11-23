@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 from pathlib import Path
+from datetime import timedelta
 import os
 from dotenv import load_dotenv
 import dj_database_url
@@ -136,7 +137,7 @@ elif APP_ENV == "development":
     test_database = dj_database_url.parse(
         os.getenv(
             "LOCAL_TEST_DATABASE_URL",
-            "postgresql://Holan:test_password@localhost:5432/holan_test",
+            "postgresql://holan:test_password@localhost:5432/holan_test",
         )
     )
     if default_database["NAME"] == test_database["NAME"]:
@@ -216,6 +217,8 @@ REST_FRAMEWORK = {
 
 SIMPLE_JWT = {
     "SIGNING_KEY": os.getenv("JWT_SIGNING_KEY", SECRET_KEY),
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=15),
+    "REFRESH_TOKEN_LIFETIME": timedelta(hours=24),
 }
 
 AUTH_USER_MODEL = "accounts.User"

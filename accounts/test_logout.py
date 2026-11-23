@@ -3,8 +3,12 @@ from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken
+from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import AuditLog
+from django.utils import timezone
+from datetime import timedelta
+
+from .models import AuditLog, AuthenticationSession
 
 
 class LogoutTests(APITestCase):
@@ -12,17 +16,16 @@ class LogoutTests(APITestCase):
         self.password = "A-secure-test-password-42"
         self.user = get_user_model().objects.create_user(
             username="logout-user",
-            email="logout@example.com",
+            email="logout@holansl.com",
             password=self.password,
         )
-        login_response = self.client.post(
-            reverse("token_obtain_pair"),
-            {"username": self.user.username, "password": self.password},
-            format="json",
+        session = AuthenticationSession.objects.create(
+            user=self.user, expires_at=timezone.now() + timedelta(hours=24)
         )
-        self.assertEqual(login_response.status_code, status.HTTP_200_OK)
-        self.access = login_response.data["access"]
-        self.refresh = login_response.data["refresh"]
+        refresh = RefreshToken.for_user(self.user)
+        refresh["sid"] = str(session.id)
+        self.access = str(refresh.access_token)
+        self.refresh = str(refresh)
 
     def test_logout_revokes_access_and_refresh_and_records_audit(self):
         response = self.client.post(
@@ -58,18 +61,18 @@ class LogoutTests(APITestCase):
     def test_logout_rejects_mismatched_token_pair_without_revoking_it(self):
         other_user = get_user_model().objects.create_user(
             username="other-logout-user",
-            email="other-logout@example.com",
+            email="other-logout@holansl.com",
             password=self.password,
         )
-        other_login = self.client.post(
-            reverse("token_obtain_pair"),
-            {"username": other_user.username, "password": self.password},
-            format="json",
+        other_session = AuthenticationSession.objects.create(
+            user=other_user, expires_at=timezone.now() + timedelta(hours=24)
         )
+        other_refresh = RefreshToken.for_user(other_user)
+        other_refresh["sid"] = str(other_session.id)
 
         response = self.client.post(
             reverse("logout"),
-            {"access": self.access, "refresh": other_login.data["refresh"]},
+            {"access": self.access, "refresh": str(other_refresh)},
             format="json",
         )
 
@@ -81,4 +84,4 @@ class LogoutTests(APITestCase):
         ).latest("created_at")
         self.assertIsNone(audit.user)
         self.assertNotIn(self.access, str(audit.metadata))
-        self.assertNotIn(other_login.data["refresh"], str(audit.metadata))
+        self.assertNotIn(str(other_refresh), str(audit.metadata))
