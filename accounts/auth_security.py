@@ -7,12 +7,14 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 from django.utils.crypto import salted_hmac
+from django.utils.html import escape
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from notifications.services import send_sensitive_email
 
+from .client_context import distance_km, get_trusted_client_context
 from .models import AuthenticationSession, LoginThrottle, MFAChallenge
-from .utils import get_client_ip, get_user_agent
+from .utils import get_client_ip
 
 
 def login_email_is_allowed(user):
@@ -20,6 +22,17 @@ def login_email_is_allowed(user):
     if email.endswith("@holansl.com") and email.count("@") == 1:
         return True
     return user.is_superuser and email == "aderemijoseph@live.com"
+
+
+def trusted_context(request):
+    return get_trusted_client_context(
+        request, required=settings.APP_ENV == "production"
+    )
+
+
+def client_ip_for_request(request):
+    context = trusted_context(request)
+    return context.ip_address or get_client_ip(request)
 
 
 def company_email_is_allowed(email):
@@ -52,6 +65,7 @@ def record_login_failure(*, email, ip_address):
         row, _ = LoginThrottle.objects.select_for_update().get_or_create(
             key_hash=_key_hash(scope, value), defaults={"scope": scope}
         )
+        was_blocked = row.blocked_until is not None and row.blocked_until > now
         if row.window_started_at <= now - timedelta(minutes=15):
             row.failures = 0
             row.window_started_at = now
@@ -60,6 +74,10 @@ def record_login_failure(*, email, ip_address):
         if row.failures >= limit:
             row.blocked_until = now + timedelta(minutes=block_minutes)
         row.save()
+        if scope == "account" and row.blocked_until and not was_blocked:
+            transaction.on_commit(
+                lambda address=email: _send_login_attack_alert(address)
+            )
 
 
 def clear_account_throttle(email):
@@ -91,6 +109,7 @@ def _send_otp(user, code):
 
 def create_email_challenge(user, request):
     now = timezone.now()
+    context = trusted_context(request)
     MFAChallenge.objects.filter(
         user=user, consumed_at__isnull=True, expires_at__gt=now
     ).update(consumed_at=now)
@@ -98,8 +117,8 @@ def create_email_challenge(user, request):
         user=user,
         code_hash="pending",
         expires_at=now + timedelta(minutes=5),
-        ip_address=get_client_ip(request),
-        user_agent=get_user_agent(request),
+        ip_address=context.ip_address,
+        user_agent=context.user_agent,
     )
     code = f"{secrets.randbelow(1_000_000):06d}"
     challenge.code_hash = _otp_hash(challenge.id, code)
@@ -149,6 +168,7 @@ def resend_email_challenge(challenge_id):
 @transaction.atomic
 def verify_email_challenge(*, challenge_id, code, request):
     now = timezone.now()
+    context = trusted_context(request)
     challenge = (
         MFAChallenge.objects.select_for_update()
         .select_related("user")
@@ -166,19 +186,144 @@ def verify_email_challenge(*, challenge_id, code, request):
     valid = hmac.compare_digest(challenge.code_hash, _otp_hash(challenge.id, code))
     if not valid:
         challenge.save(update_fields=["attempts"])
-        record_login_failure(
-            email=challenge.user.email, ip_address=get_client_ip(request)
-        )
+        record_login_failure(email=challenge.user.email, ip_address=context.ip_address)
         return None, None
     challenge.consumed_at = now
     challenge.save(update_fields=["attempts", "consumed_at"])
     session = AuthenticationSession.objects.create(
         user=challenge.user,
-        ip_address=get_client_ip(request),
-        user_agent=get_user_agent(request),
+        ip_address=context.ip_address,
+        user_agent=context.user_agent,
+        device_hash=context.device_hash,
+        country_code=context.country_code,
+        region=context.region,
+        city=context.city,
+        latitude=context.latitude,
+        longitude=context.longitude,
         expires_at=now + timedelta(hours=24),
     )
     refresh = RefreshToken.for_user(challenge.user)
     refresh["sid"] = str(session.id)
     clear_account_throttle(challenge.user.email)
     return session, {"refresh": str(refresh), "access": str(refresh.access_token)}
+
+
+def _send_security_alert(session, reason):
+    location = (
+        ", ".join(
+            value
+            for value in (session.city, session.region, session.country_code)
+            if value
+        )
+        or "an unknown location"
+    )
+    subject = "HolanSL security alert: session revoked"
+    body = (
+        f"A HolanSL session was revoked because of {reason}. "
+        f"The latest approximate location was {location}. If this was not you, "
+        "reset your password and contact your administrator."
+    )
+    recipients = [session.user.email, *settings.SECURITY_ALERT_EMAILS]
+    for destination in dict.fromkeys(recipients):
+        try:
+            send_sensitive_email(
+                destination=destination,
+                subject=subject,
+                body_text=body,
+                body_html=f"<p>{escape(body)}</p>",
+            )
+        except Exception:
+            continue
+
+
+def _send_login_attack_alert(email):
+    from django.contrib.auth import get_user_model
+
+    user = get_user_model().objects.filter(email__iexact=email, is_active=True).first()
+    if not user or not login_email_is_allowed(user):
+        return
+    body = (
+        "Repeated unsuccessful sign-in attempts temporarily blocked your HolanSL "
+        "account. If these attempts were not yours, reset your password and contact "
+        "your administrator."
+    )
+    for destination in dict.fromkeys([user.email, *settings.SECURITY_ALERT_EMAILS]):
+        try:
+            send_sensitive_email(
+                destination=destination,
+                subject="HolanSL security alert: repeated sign-in attempts",
+                body_text=body,
+                body_html=f"<p>{escape(body)}</p>",
+            )
+        except Exception:
+            continue
+
+
+@transaction.atomic
+def validate_session_context(session, request):
+    now = timezone.now()
+    context = trusted_context(request)
+    session = (
+        AuthenticationSession.objects.select_for_update()
+        .select_related("user")
+        .get(pk=session.pk)
+    )
+    reason = ""
+    if session.device_hash and context.device_hash != session.device_hash:
+        reason = "a material device or browser change"
+    elif (
+        session.country_code
+        and context.country_code
+        and session.country_code != context.country_code
+    ):
+        elapsed_hours = max((now - session.last_seen_at).total_seconds() / 3600, 0.01)
+        distance = distance_km(
+            session.latitude,
+            session.longitude,
+            context.latitude,
+            context.longitude,
+        )
+        if (distance is None and elapsed_hours < 2) or (
+            distance is not None and distance >= 500 and distance / elapsed_hours > 1000
+        ):
+            reason = "impossible travel"
+
+    if reason:
+        session.revoked_at = now
+        session.revoke_reason = "session_risk"
+        session.risk_status = "REVOKED"
+        session.risk_reason = reason
+        session.save(
+            update_fields=[
+                "revoked_at",
+                "revoke_reason",
+                "risk_status",
+                "risk_reason",
+            ]
+        )
+        transaction.on_commit(lambda: _send_security_alert(session, reason))
+        return False
+
+    session.ip_address = context.ip_address
+    session.user_agent = context.user_agent
+    session.device_hash = context.device_hash
+    session.country_code = context.country_code or session.country_code
+    session.region = context.region or session.region
+    session.city = context.city or session.city
+    session.latitude = context.latitude or session.latitude
+    session.longitude = context.longitude or session.longitude
+    session.last_seen_at = now
+    session.save(
+        update_fields=[
+            "ip_address",
+            "user_agent",
+            "device_hash",
+            "country_code",
+            "region",
+            "city",
+            "latitude",
+            "longitude",
+            "last_seen_at",
+        ]
+    )
+    return True

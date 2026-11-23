@@ -9,6 +9,22 @@ grants the exception. Password success creates only a short-lived MFA challenge.
 JWTs are issued after OTP verification and remain bound to a revocable server-side
 authentication session. Login and OTP failures are rate-limited by account and IP.
 
+In production, every Next.js-to-Django authentication request carries a short-lived
+HMAC-signed client-context envelope. `AUTH_CONTEXT_SIGNING_KEY` must contain the
+same high-entropy value in Vercel and Render; Django rejects missing, expired or
+forged context. The envelope contains Vercel's requester IP geolocation and browser
+user agent. Only approximate city/region/country and coordinates are retained.
+Never expose the signing key to browser-prefixed environment variables.
+
+Managed sessions compare their trusted context on authenticated requests and token
+refresh. A material browser/OS change revokes the session. A country change revokes
+only when distance and elapsed time imply impossible travel (at least 500 km and
+over 1,000 km/h); when coordinates are unavailable, a country change within two
+hours is treated as high risk. Missing geolocation does not invent a location.
+Risk revocation and a newly blocked account trigger sensitive email-only alerts to
+the user and optional comma-separated `SECURITY_ALERT_EMAILS` recipients. Provider
+failure never restores a risky session.
+
 The configured default/temporary staff password comes from the environment, not
 from a hard-coded new value. A new user must not enter the dashboard with that
 password: direct the user into password update/reset first and enforce the block

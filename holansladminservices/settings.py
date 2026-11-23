@@ -221,6 +221,16 @@ SIMPLE_JWT = {
     "REFRESH_TOKEN_LIFETIME": timedelta(hours=24),
 }
 
+AUTH_CONTEXT_SIGNING_KEY = os.getenv("AUTH_CONTEXT_SIGNING_KEY", "").strip()
+AUTH_CONTEXT_MAX_AGE_SECONDS = 90
+if APP_ENV == "production" and not AUTH_CONTEXT_SIGNING_KEY:
+    raise ImproperlyConfigured("AUTH_CONTEXT_SIGNING_KEY is required in production.")
+SECURITY_ALERT_EMAILS = [
+    email.strip()
+    for email in os.getenv("SECURITY_ALERT_EMAILS", "").split(",")
+    if email.strip()
+]
+
 AUTH_USER_MODEL = "accounts.User"
 
 SPECTACULAR_SETTINGS = {

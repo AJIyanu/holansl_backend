@@ -14,11 +14,13 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from .auth_security import (
     company_email_is_allowed,
+    client_ip_for_request,
     create_email_challenge,
     login_email_is_allowed,
     record_login_failure,
     resend_email_challenge,
     throttle_is_blocked,
+    validate_session_context,
     verify_email_challenge,
 )
 from .models import (
@@ -92,7 +94,7 @@ class HolanTokenObtainPairSerializer(TokenObtainPairSerializer):
         request = self.context.get("request")
         username = attrs.get(self.username_field, "").strip()
         password = attrs.get("password", "")
-        ip_address = get_client_ip(request)
+        ip_address = client_ip_for_request(request)
         generic_error = "No active account found with the given credentials"
 
         if throttle_is_blocked(email=username, ip_address=ip_address):
@@ -276,8 +278,10 @@ class SessionTokenRefreshSerializer(TokenRefreshSerializer):
         ).first()
         if not session:
             raise AuthenticationFailed("Session has expired.", code="session_expired")
-        session.last_seen_at = timezone.now()
-        session.save(update_fields=["last_seen_at"])
+        if not validate_session_context(session, self.context.get("request")):
+            raise AuthenticationFailed(
+                "Session verification required.", code="session_risk_detected"
+            )
         return super().validate(attrs)
 
 
@@ -291,6 +295,11 @@ class AuthenticationSessionSerializer(serializers.ModelSerializer):
             "id",
             "ip_address",
             "user_agent",
+            "country_code",
+            "region",
+            "city",
+            "risk_status",
+            "risk_reason",
             "created_at",
             "last_seen_at",
             "expires_at",

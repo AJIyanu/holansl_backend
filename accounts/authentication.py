@@ -5,6 +5,7 @@ from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken
 from django.utils import timezone
 
 from .models import AuthenticationSession
+from .auth_security import validate_session_context
 
 
 class BlacklistAwareJWTAuthentication(JWTAuthentication):
@@ -32,3 +33,17 @@ class BlacklistAwareJWTAuthentication(JWTAuthentication):
             raise AuthenticationFailed("Session has expired.", code="session_expired")
 
         return validated_token
+
+    def authenticate(self, request):
+        result = super().authenticate(request)
+        if result is None:
+            return None
+        user, token = result
+        session = AuthenticationSession.objects.filter(
+            id=token.get("sid"), user=user
+        ).first()
+        if not session or not validate_session_context(session, request):
+            raise AuthenticationFailed(
+                "Session verification required.", code="session_risk_detected"
+            )
+        return user, token

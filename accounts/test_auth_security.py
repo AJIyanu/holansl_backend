@@ -1,6 +1,12 @@
+import base64
+import hashlib
+import hmac
+import json
+import time
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.test import override_settings
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
@@ -16,6 +22,34 @@ class EmailMFAAuthenticationTests(APITestCase):
             email="staff@holansl.com",
             password=self.password,
         )
+
+    def signed_context(self, *, country, latitude, longitude):
+        encoded = (
+            base64.urlsafe_b64encode(
+                json.dumps(
+                    {
+                        "v": 1,
+                        "ts": int(time.time()),
+                        "ip": "203.0.113.10",
+                        "country": country,
+                        "region": "test-region",
+                        "city": "test-city",
+                        "lat": latitude,
+                        "lon": longitude,
+                        "ua": "Test Browser/1.0 Test OS",
+                    }
+                ).encode()
+            )
+            .decode()
+            .rstrip("=")
+        )
+        signature = hmac.new(
+            b"test-context-key", encoded.encode(), hashlib.sha256
+        ).hexdigest()
+        return {
+            "HTTP_X_HOLAN_CLIENT_CONTEXT": encoded,
+            "HTTP_X_HOLAN_CLIENT_SIGNATURE": signature,
+        }
 
     @patch("accounts.auth_security._send_otp")
     @patch("accounts.auth_security.secrets.randbelow", return_value=123456)
@@ -131,3 +165,40 @@ class EmailMFAAuthenticationTests(APITestCase):
             status.HTTP_204_NO_CONTENT,
         )
         self.assertNotEqual(self.client.get(reverse("current-user")).status_code, 200)
+
+    @override_settings(
+        APP_ENV="production",
+        AUTH_CONTEXT_SIGNING_KEY="test-context-key",
+        NOTIFICATION_EMAIL_ENABLED=False,
+    )
+    @patch("accounts.auth_security._send_otp")
+    @patch("accounts.auth_security.secrets.randbelow", return_value=123456)
+    def test_impossible_travel_revokes_session(self, _random, _send):
+        nigeria = self.signed_context(
+            country="NG", latitude="6.5244", longitude="3.3792"
+        )
+        login = self.client.post(
+            reverse("token_obtain_pair"),
+            {"username": self.user.email, "password": self.password},
+            format="json",
+            **nigeria,
+        )
+        verified = self.client.post(
+            reverse("email-mfa-verify"),
+            {"challenge_id": login.data["challenge_id"], "code": "123456"},
+            format="json",
+            **nigeria,
+        )
+        self.assertEqual(verified.status_code, 200)
+
+        germany = self.signed_context(
+            country="DE", latitude="52.5200", longitude="13.4050"
+        )
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {verified.data['access']}")
+        response = self.client.get(reverse("current-user"), **germany)
+
+        self.assertNotEqual(response.status_code, 200)
+        session = AuthenticationSession.objects.get(user=self.user)
+        self.assertEqual(session.risk_status, "REVOKED")
+        self.assertEqual(session.risk_reason, "impossible travel")
+        self.assertIsNotNone(session.revoked_at)

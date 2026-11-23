@@ -23,6 +23,12 @@ the `DJANGO_SU_*` initial administrator values, and `SUPABASE_STORAGE_URL`,
 `SUPABASE_STORAGE_SECRET_KEY` and `SUPABASE_STORAGE_BUCKET`. The bucket must be
 created as private in Supabase before the build can pass.
 
+Production also requires `AUTH_CONTEXT_SIGNING_KEY`. Configure the exact same
+high-entropy value in Render and the Vercel frontend, for example a separately
+generated 32-byte random secret. It is a server-only secret and must never use a
+`NEXT_PUBLIC_` name. Optional `SECURITY_ALERT_EMAILS` is a comma-separated list of
+internal recipients for account-attack and session-risk alerts.
+
 ## Local development
 
 Development must use a separate local PostgreSQL database:
