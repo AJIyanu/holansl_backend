@@ -83,6 +83,32 @@ class EmailMFAAuthenticationTests(APITestCase):
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {verified.data['access']}")
         self.assertEqual(self.client.get(reverse("current-user")).status_code, 200)
 
+    @override_settings(APP_ENV="development", AUTH_CONTEXT_SIGNING_KEY="")
+    @patch("accounts.auth_security._send_otp")
+    def test_development_login_skips_email_mfa(self, send):
+        response = self.client.post(
+            reverse("token_obtain_pair"),
+            {"username": self.user.email, "password": self.password},
+            format="json",
+            HTTP_USER_AGENT="Local Browser/1.0",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn("access", response.data)
+        self.assertIn("refresh", response.data)
+        self.assertNotIn("mfa_required", response.data)
+        send.assert_not_called()
+
+        session = AuthenticationSession.objects.get(user=self.user)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {response.data['access']}")
+        current_user = self.client.get(
+            reverse("current-user"), HTTP_USER_AGENT="Different Browser/2.0"
+        )
+
+        self.assertEqual(current_user.status_code, status.HTTP_200_OK)
+        session.refresh_from_db()
+        self.assertIsNone(session.revoked_at)
+
     @patch("accounts.auth_security._send_otp")
     def test_username_login_is_rejected_even_for_company_account(self, send):
         response = self.client.post(

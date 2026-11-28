@@ -19,6 +19,7 @@ from accounts.models import AuditLog
 from .models import (
     ContactMethod,
     Party,
+    PartyAffiliation,
     PartyMergeRecord,
     PartyNote,
     PartyRole,
@@ -75,6 +76,7 @@ class CRMStageThreeAPITests(APITestCase):
                 "view_party",
                 "add_party",
                 "change_party",
+                "delete_party",
                 "deactivate_party",
                 "archive_party",
                 "block_party",
@@ -521,13 +523,93 @@ def test_superuser_can_delete_an_unused_party(self):
         )
     )
 
-    self.assertEqual(
-        response.status_code,
-        status.HTTP_204_NO_CONTENT,
-    )
+    self.assertEqual(response.status_code, status.HTTP_200_OK)
+    self.assertEqual(response.data["party_id"], str(party.id))
+    self.assertGreaterEqual(response.data["deleted_count"], 1)
 
     self.assertFalse(
         Party.objects.filter(
             pk=party.id,
         ).exists()
     )
+
+
+class PartyDeletionAPITests(APITestCase):
+    """Verify permission-aware deletion preview and safe affiliation cleanup."""
+
+    def setUp(self):
+        User = get_user_model()
+        self.user = User.objects.create_user(
+            username="crm.deleter",
+            email="crm.deleter@holansl.com",
+            password="TestPassword123!",
+        )
+        permission = Permission.objects.get(
+            content_type__app_label="crm",
+            codename="delete_party",
+        )
+        self.user.user_permissions.add(permission)
+        self.superuser = User.objects.create_superuser(
+            username="crm.deletion.superuser",
+            email="crm.deletion.superuser@holansl.com",
+            password="TestPassword123!",
+        )
+        self.client.force_authenticate(self.user)
+
+    def _create_affiliation(self):
+        person = Party.objects.create(
+            display_name="Mistaken Contact",
+            entity_kind=Party.EntityKind.INDIVIDUAL,
+        )
+        organisation = Party.objects.create(display_name="Example Organisation")
+        affiliation = PartyAffiliation.objects.create(
+            person=person,
+            organisation=organisation,
+        )
+        return person, organisation, affiliation
+
+    def test_preview_and_delete_return_structured_impact(self):
+        party = Party.objects.create(display_name="Unused CRM Party")
+
+        preview = self.client.get(
+            reverse("party-deletion-impact", args=[party.id])
+        )
+        self.assertEqual(preview.status_code, status.HTTP_200_OK)
+        self.assertTrue(preview.data["can_delete"])
+
+        response = self.client.delete(reverse("party-detail", args=[party.id]))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["party_id"], str(party.id))
+        self.assertGreaterEqual(response.data["deleted_count"], 1)
+
+    def test_affiliation_is_reported_as_a_structured_conflict(self):
+        person, _, affiliation = self._create_affiliation()
+
+        response = self.client.delete(reverse("party-detail", args=[person.id]))
+
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+        self.assertEqual(
+            response.data["code"],
+            "party_has_business_references",
+        )
+        self.assertEqual(response.data["impact"]["affiliations"][0]["count"], "1")
+        self.assertTrue(PartyAffiliation.objects.filter(pk=affiliation.id).exists())
+
+    def test_superuser_may_explicitly_remove_mistaken_affiliation(self):
+        person, organisation, affiliation = self._create_affiliation()
+        self.client.force_authenticate(self.superuser)
+
+        response = self.client.delete(
+            reverse("party-detail", args=[person.id]),
+            {"remove_affiliations": True},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertGreaterEqual(
+            response.data["affiliation_cleanup"]["deleted_count"],
+            1,
+        )
+        self.assertFalse(Party.objects.filter(pk=person.id).exists())
+        self.assertFalse(PartyAffiliation.objects.filter(pk=affiliation.id).exists())
+        self.assertTrue(Party.objects.filter(pk=organisation.id).exists())

@@ -8,6 +8,9 @@ external exception is superuser `aderemijoseph@live.com`; the address alone neve
 grants the exception. Password success creates only a short-lived MFA challenge.
 JWTs are issued after OTP verification and remain bound to a revocable server-side
 authentication session. Login and OTP failures are rate-limited by account and IP.
+When and only when `APP_ENV=development`, a valid password issues the same managed
+session directly without sending an email OTP. Company-email restrictions,
+password throttling, session expiry, logout and explicit revocation remain active.
 
 In production, every Next.js-to-Django authentication request carries a short-lived
 HMAC-signed client-context envelope. `AUTH_CONTEXT_SIGNING_KEY` must contain the
@@ -24,6 +27,12 @@ hours is treated as high risk. Missing geolocation does not invent a location.
 Risk revocation and a newly blocked account trigger sensitive email-only alerts to
 the user and optional comma-separated `SECURITY_ALERT_EMAILS` recipients. Provider
 failure never restores a risky session.
+
+Device and impossible-travel evaluation is skipped only when
+`APP_ENV=development`, because localhost does not receive Vercel's signed location
+context and browser metadata can vary across local proxies. Production retains the
+signed-context requirement and all risk-revocation behaviour. The isolated `test`
+environment does not implicitly receive this bypass.
 
 The configured default/temporary staff password comes from the environment, not
 from a hard-coded new value. A new user must not enter the dashboard with that

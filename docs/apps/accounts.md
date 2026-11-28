@@ -66,6 +66,12 @@ serializer validation and service rules can impose additional restrictions.
   to five attempts; resend has a 30-second cooldown and three-replacement limit.
   Successful verification creates a 24-hour managed session and issues a 15-minute
   access token plus 24-hour refresh token carrying that session ID.
+- With exactly `APP_ENV=development`, successful password authentication issues
+  the managed access/refresh token pair without creating or emailing an MFA
+  challenge. This local-only path retains email eligibility, brute-force limits,
+  default-password blocking, session expiry and revocation. Production continues
+  to require email OTP and signed client context; `APP_ENV=test` does not activate
+  the development bypass.
 - Five failed passwords in 15 minutes block the account key for 15 minutes; 20
   failures from one IP block that IP key for one hour. Responses remain neutral.
   Refresh and authenticated requests reject revoked or expired managed sessions.
@@ -75,6 +81,9 @@ serializer validation and service rules can impose additional restrictions.
   material device change or impossible travel revokes the session and requires a
   fresh password/email-OTP login. Session responses expose approximate location,
   activity and risk status to the owning user, never the signing envelope or key.
+  Development sessions skip device and impossible-travel evaluation so unsigned
+  localhost requests cannot revoke themselves; their expiry and manual/logout
+  revocation checks remain enforced.
 - Login OTP email uses the sensitive immediate email-only service. Codes are not
   persisted in notification/outbox records, audit metadata, API responses or URLs.
 - Logout accepts {"access":"TOKEN","refresh":"TOKEN"}. Both JWTs must be

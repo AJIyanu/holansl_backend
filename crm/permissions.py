@@ -70,6 +70,7 @@ class PartyActionPermission(BasePermission):
         "partial_update": "crm.change_party",
         "profile": "crm.change_party",
         "destroy": "crm.delete_party",
+        "deletion_impact": "crm.delete_party",
         "deactivate": "crm.deactivate_party",
         "reactivate": "crm.deactivate_party",
         "suspend": "crm.block_party",

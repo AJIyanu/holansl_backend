@@ -16,6 +16,7 @@ from .auth_security import (
     company_email_is_allowed,
     client_ip_for_request,
     create_email_challenge,
+    create_managed_session_tokens,
     login_email_is_allowed,
     record_login_failure,
     resend_email_challenge,
@@ -120,6 +121,22 @@ class HolanTokenObtainPairSerializer(TokenObtainPairSerializer):
                     "reset_required": True,
                 }
             )
+
+        if settings.APP_ENV == "development":
+            session, tokens = create_managed_session_tokens(self.user, request)
+            create_audit_log(
+                user=self.user,
+                event_category=AuditLog.EventCategory.AUTH,
+                event_type=AuditLog.EventType.LOGIN_SUCCESS,
+                status=AuditLog.EventStatus.SUCCESS,
+                username_attempted=self.user.email,
+                request=request,
+                metadata={
+                    "session_id": str(session.id),
+                    "method": "development_password",
+                },
+            )
+            return tokens
 
         try:
             challenge = create_email_challenge(self.user, request)

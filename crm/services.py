@@ -18,6 +18,7 @@ from uuid import UUID
 
 from django.core.exceptions import ObjectDoesNotExist
 from django.db import transaction
+from django.db.models.deletion import CASCADE, PROTECT, SET_DEFAULT, SET_NULL
 from django.db.models import Q
 from django.utils import timezone
 from rest_framework.exceptions import (
@@ -624,25 +625,30 @@ def set_party_archive_state(
     return party
 
 
-def get_external_party_references(
+def get_party_deletion_impact(
     party: Party,
-) -> list[dict[str, Any]]:
+) -> dict[str, Any]:
     """
-    Discover non-CRM records that currently reference a party.
+    Describe every reverse relationship affected by permanent party deletion.
 
     Accepts:
         A Party instance.
 
     Returns:
-        A list containing the referencing model, field and record count.
+        Structured cascade, nullification, affiliation-cleanup and blocker lists.
     """
 
-    references = []
+    impact = {
+        "cascade": [],
+        "set_null": [],
+        "affiliations": [],
+        "blockers": [],
+    }
 
     for relation in party._meta.related_objects:
         related_model = relation.related_model
 
-        if related_model._meta.app_label == "crm" or related_model._meta.auto_created:
+        if related_model._meta.auto_created:
             continue
 
         field_name = relation.field.name
@@ -653,22 +659,45 @@ def get_external_party_references(
             }
         ).count()
 
-        if count:
-            references.append(
-                {
-                    "model": related_model._meta.label,
-                    "field": field_name,
-                    "count": count,
-                }
-            )
+        if not count:
+            continue
 
-    return sorted(
-        references,
-        key=lambda item: (
-            item["model"],
-            item["field"],
-        ),
+        item = {
+            "model": related_model._meta.label,
+            "field": field_name,
+            "count": count,
+        }
+        on_delete = relation.field.remote_field.on_delete
+
+        if related_model is PartyAffiliation:
+            impact["affiliations"].append(item)
+        elif on_delete is CASCADE:
+            impact["cascade"].append(item)
+        elif on_delete in {SET_NULL, SET_DEFAULT}:
+            impact["set_null"].append(item)
+        elif on_delete is PROTECT:
+            impact["blockers"].append(item)
+        else:
+            impact["blockers"].append(item)
+
+    for values in impact.values():
+        values.sort(key=lambda item: (item["model"], item["field"]))
+
+    impact["can_delete"] = not impact["affiliations"] and not impact["blockers"]
+    impact["can_delete_with_affiliation_cleanup"] = (
+        bool(impact["affiliations"]) and not impact["blockers"]
     )
+    return impact
+
+
+def get_external_party_references(party: Party) -> list[dict[str, Any]]:
+    """Return non-CRM blockers retained for existing service callers."""
+
+    return [
+        item
+        for item in get_party_deletion_impact(party)["blockers"]
+        if not item["model"].startswith("crm.")
+    ]
 
 
 @transaction.atomic
@@ -677,7 +706,8 @@ def delete_unused_party(
     party_id: UUID | str,
     user,
     request=None,
-) -> tuple[int, dict[str, int]]:
+    remove_affiliations: bool = False,
+) -> dict[str, Any]:
     """
     Permanently delete an unused party after strict safety checks.
 
@@ -688,33 +718,49 @@ def delete_unused_party(
         Django's total deleted count and per-model deletion dictionary.
     """
 
-    if not user or not user.is_superuser:
-        raise PermissionDenied("Permanent CRM deletion is limited to superusers.")
+    if not user or not user.has_perm("crm.delete_party"):
+        raise PermissionDenied("You do not have permission to delete CRM parties.")
 
     party = Party.objects.select_for_update().get(
         pk=party_id,
     )
 
-    references = get_external_party_references(
-        party,
-    )
+    impact = get_party_deletion_impact(party)
+    affiliation_cleanup = {
+        "deleted_count": 0,
+        "deleted_models": {},
+    }
 
-    if references:
+    if impact["affiliations"] and remove_affiliations:
+        if not user.is_superuser:
+            raise PermissionDenied(
+                "Only a superuser may remove mistaken affiliations during deletion."
+            )
+        cleanup_count, cleanup_models = PartyAffiliation.objects.filter(
+            Q(person=party) | Q(organisation=party)
+        ).delete()
+        affiliation_cleanup = {
+            "deleted_count": cleanup_count,
+            "deleted_models": cleanup_models,
+        }
+        impact = get_party_deletion_impact(party)
+
+    if impact["affiliations"] or impact["blockers"]:
         raise CRMConflict(
             {
                 "detail": (
-                    "This party is referenced by business records "
-                    "and cannot be permanently deleted."
+                    "This party has protected relationships and cannot be "
+                    "permanently deleted until they are resolved."
                 ),
                 "code": "party_has_business_references",
-                "references": references,
+                "impact": impact,
             }
         )
 
     party_id_value = party.id
     party_name = party.display_name
 
-    deletion_result = party.delete()
+    deleted_count, deleted_models = party.delete()
 
     log_crm_event(
         user=user,
@@ -728,7 +774,15 @@ def delete_unused_party(
         },
     )
 
-    return deletion_result
+    return {
+        "party_id": str(party_id_value),
+        "display_name": party_name,
+        "deleted_count": deleted_count,
+        "deleted_models": deleted_models,
+        "cascade": impact["cascade"],
+        "set_null": impact["set_null"],
+        "affiliation_cleanup": affiliation_cleanup,
+    }
 
 
 def _merge_role_records(

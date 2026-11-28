@@ -131,6 +131,27 @@ def create_email_challenge(user, request):
     return challenge
 
 
+def create_managed_session_tokens(user, request):
+    now = timezone.now()
+    context = trusted_context(request)
+    session = AuthenticationSession.objects.create(
+        user=user,
+        ip_address=context.ip_address,
+        user_agent=context.user_agent,
+        device_hash=context.device_hash,
+        country_code=context.country_code,
+        region=context.region,
+        city=context.city,
+        latitude=context.latitude,
+        longitude=context.longitude,
+        expires_at=now + timedelta(hours=24),
+    )
+    refresh = RefreshToken.for_user(user)
+    refresh["sid"] = str(session.id)
+    clear_account_throttle(user.email)
+    return session, {"refresh": str(refresh), "access": str(refresh.access_token)}
+
+
 @transaction.atomic
 def resend_email_challenge(challenge_id):
     now = timezone.now()
@@ -190,22 +211,7 @@ def verify_email_challenge(*, challenge_id, code, request):
         return None, None
     challenge.consumed_at = now
     challenge.save(update_fields=["attempts", "consumed_at"])
-    session = AuthenticationSession.objects.create(
-        user=challenge.user,
-        ip_address=context.ip_address,
-        user_agent=context.user_agent,
-        device_hash=context.device_hash,
-        country_code=context.country_code,
-        region=context.region,
-        city=context.city,
-        latitude=context.latitude,
-        longitude=context.longitude,
-        expires_at=now + timedelta(hours=24),
-    )
-    refresh = RefreshToken.for_user(challenge.user)
-    refresh["sid"] = str(session.id)
-    clear_account_throttle(challenge.user.email)
-    return session, {"refresh": str(refresh), "access": str(refresh.access_token)}
+    return create_managed_session_tokens(challenge.user, request)
 
 
 def _send_security_alert(session, reason):
@@ -262,6 +268,11 @@ def _send_login_attack_alert(email):
 @transaction.atomic
 def validate_session_context(session, request):
     now = timezone.now()
+    if settings.APP_ENV == "development":
+        session.last_seen_at = now
+        session.save(update_fields=["last_seen_at"])
+        return True
+
     context = trusted_context(request)
     session = (
         AuthenticationSession.objects.select_for_update()

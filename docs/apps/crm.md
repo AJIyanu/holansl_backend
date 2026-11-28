@@ -31,6 +31,7 @@ serializer validation and service rules can impose additional restrictions.
 | POST | `/crm/parties/duplicate-check/` | `PartyViewSet`: duplicate_check | PartyActionPermission |
 | POST | `/crm/parties/quick-create/` | `PartyViewSet`: quick_create | PartyActionPermission |
 | GET, PUT, PATCH, DELETE | `/crm/parties/{id}/` | `PartyViewSet`: retrieve, update, partial_update, destroy | PartyActionPermission |
+| GET | `/crm/parties/{id}/deletion-impact/` | Preview cascades, nullifications, affiliations and protected deletion blockers | PartyActionPermission |
 | POST | `/crm/parties/{id}/archive/` | `PartyViewSet`: archive | PartyActionPermission |
 | POST | `/crm/parties/{id}/block/` | `PartyViewSet`: block | PartyActionPermission |
 | POST | `/crm/parties/{id}/deactivate/` | `PartyViewSet`: deactivate | PartyActionPermission |
@@ -112,7 +113,13 @@ Example lifecycle request:
 
 PartyActionPermission maps ordinary and lifecycle actions to explicit native
 permissions; blocked/suspended reactivation additionally depends on block access.
-Safe party deletion is superuser-only and rejects protected business references.
+Safe party deletion requires `crm.delete_party` and rejects protected business
+or historical references with a structured HTTP 409 response. The deletion-impact
+endpoint previews cascaded rows, nullable references, affiliations and blockers.
+An explicit superuser deletion request may remove mistaken Party affiliations in
+the same transaction; it does not bypass other protected CRM, procurement or
+ledger references. Successful deletion returns affected-model counts instead of
+an empty response.
 Do not generalize that policy to every related-resource DELETE.
 
 Related records generally use StrictDjangoModelPermissions, including view access

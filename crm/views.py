@@ -94,6 +94,7 @@ from .serializers import (
 from .services import (
     change_party_status,
     delete_unused_party,
+    get_party_deletion_impact,
     log_crm_event,
     merge_parties,
     set_party_archive_state,
@@ -466,23 +467,42 @@ class PartyViewSet(
         Permanently delete an unused party through the safe deletion service.
 
         Accepts:
-            An authenticated superuser DELETE request and party identifier.
+            An authenticated DELETE request and party identifier.
 
         Returns:
-            HTTP 204 when the unused party is deleted.
+            HTTP 200 with the deletion impact summary when deletion succeeds.
         """
 
         party = self.get_object()
 
-        delete_unused_party(
+        result = delete_unused_party(
             party_id=party.id,
             user=request.user,
             request=request,
+            remove_affiliations=(
+                request.data.get("remove_affiliations") is True
+                if isinstance(request.data, dict)
+                else False
+            ),
         )
 
         return Response(
-            status=status.HTTP_204_NO_CONTENT,
+            result,
+            status=status.HTTP_200_OK,
         )
+
+    @action(detail=True, methods=["get"], url_path="deletion-impact")
+    def deletion_impact(self, request, *args, **kwargs):
+        """Return all known effects and blockers before permanent deletion."""
+
+        party = self.get_object()
+        impact = get_party_deletion_impact(party)
+        impact["party_id"] = str(party.id)
+        impact["display_name"] = party.display_name
+        impact["can_remove_affiliations"] = bool(
+            request.user.is_superuser and impact["affiliations"]
+        )
+        return Response(impact)
 
     @action(
         detail=False,
